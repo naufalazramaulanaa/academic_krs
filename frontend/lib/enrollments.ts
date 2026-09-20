@@ -41,6 +41,10 @@ export interface EnrollmentDeleteResponse {
   message: string;
 }
 
+/* ==========================================================
+   GET ENROLLMENTS
+========================================================== */
+
 export async function getEnrollments(
   params: EnrollmentQueryParams,
 ): Promise<EnrollmentListResponse> {
@@ -69,19 +73,13 @@ export async function getEnrollments(
 
     ...(filters !== undefined
       ? {
-          filters:
-            JSON.stringify(
-              filters,
-            ),
+          filters: JSON.stringify(filters),
         }
       : {}),
 
     ...(sorts !== undefined
       ? {
-          sorts:
-            JSON.stringify(
-              sorts,
-            ),
+          sorts: JSON.stringify(sorts),
         }
       : {}),
   };
@@ -97,6 +95,10 @@ export async function getEnrollments(
   return response.data;
 }
 
+/* ==========================================================
+   CREATE ENROLLMENT
+========================================================== */
+
 export async function createEnrollment(
   payload: CreateEnrollmentPayload,
 ): Promise<EnrollmentResourceResponse> {
@@ -108,6 +110,10 @@ export async function createEnrollment(
 
   return response.data;
 }
+
+/* ==========================================================
+   UPDATE ENROLLMENT
+========================================================== */
 
 export async function updateEnrollment(
   id: number,
@@ -122,12 +128,82 @@ export async function updateEnrollment(
   return response.data;
 }
 
+/* ==========================================================
+   DELETE ENROLLMENT
+========================================================== */
+
 export async function deleteEnrollment(
   id: number,
 ): Promise<EnrollmentDeleteResponse> {
   const response =
     await apiClient.delete<EnrollmentDeleteResponse>(
       `/enrollments/${id}`,
+    );
+
+  return response.data;
+}
+
+/* ==========================================================
+   EXPORT ALL ENROLLMENTS
+========================================================== */
+
+export async function exportEnrollments(
+  params: EnrollmentQueryParams,
+): Promise<Blob> {
+  /*
+   * Export tidak boleh menggunakan pagination.
+   *
+   * page dan pageSize sengaja dibuang.
+   */
+  const {
+    page: _page,
+    pageSize: _pageSize,
+    filters,
+    sorts,
+    ...legacyParams
+  } = params;
+
+  /*
+   * Build query parameters untuk export.
+   */
+  const requestParams = {
+    ...legacyParams,
+
+    ...(filters !== undefined
+      ? {
+          filters: JSON.stringify(filters),
+        }
+      : {}),
+
+    ...(sorts !== undefined
+      ? {
+          sorts: JSON.stringify(sorts),
+        }
+      : {}),
+  };
+
+  /*
+   * IMPORTANT:
+   *
+   * Client global memiliki timeout 30 detik.
+   * Export 5 juta baris tidak boleh dibatasi
+   * oleh timeout request list biasa.
+   *
+   * timeout: 0 = no Axios timeout.
+   *
+   * Ini HANYA berlaku untuk request export.
+   * Request list/CRUD tetap 30 detik.
+   */
+  const response =
+    await apiClient.get<Blob>(
+      "/enrollments/export",
+      {
+        params: requestParams,
+
+        responseType: "blob",
+
+        timeout: 0,
+      },
     );
 
   return response.data;

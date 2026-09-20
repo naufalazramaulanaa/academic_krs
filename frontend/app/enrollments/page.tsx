@@ -11,7 +11,10 @@ import EnrollmentToolbar from "@/components/enrollments/EnrollmentToolbar";
 
 import { useEnrollments } from "@/hooks/useEnrollments";
 
-import { deleteEnrollment } from "@/lib/enrollments";
+import {
+  deleteEnrollment,
+  exportEnrollments,
+} from "@/lib/enrollments";
 
 import { getApiErrorMessage } from "@/lib/error";
 
@@ -33,52 +36,64 @@ export default function EnrollmentsPage() {
 
   const [page, setPage] = useState(1);
 
-  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const [pageSize, setPageSize] =
+    useState(DEFAULT_PAGE_SIZE);
 
   /* ==========================================================
      SEARCH
   ========================================================== */
 
-  const [searchInput, setSearchInput] = useState("");
+  const [searchInput, setSearchInput] =
+    useState("");
 
-  const [search, setSearch] = useState("");
+  const [search, setSearch] =
+    useState("");
 
   /* ==========================================================
      QUICK FILTERS
   ========================================================== */
 
-  const [status, setStatus] = useState<EnrollmentStatus | "">("");
+  const [status, setStatus] =
+    useState<EnrollmentStatus | "">("");
 
-  const [semester, setSemester] = useState<Semester | "">("");
+  const [semester, setSemester] =
+    useState<Semester | "">("");
 
-  const [academicYear, setAcademicYear] = useState("");
+  const [academicYear, setAcademicYear] =
+    useState("");
 
   /* ==========================================================
      LEGACY TABLE SORTING
   ========================================================== */
 
-  const [sort, setSort] = useState<EnrollmentSort>("created_at");
+  const [sort, setSort] =
+    useState<EnrollmentSort>("created_at");
 
-  const [direction, setDirection] = useState<"asc" | "desc">("desc");
+  const [direction, setDirection] =
+    useState<"asc" | "desc">("desc");
 
   /* ==========================================================
      ADVANCED QUERY
   ========================================================== */
 
-  const [advancedQueryOpen, setAdvancedQueryOpen] = useState(false);
+  const [advancedQueryOpen, setAdvancedQueryOpen] =
+    useState(false);
 
   const [advancedFilters, setAdvancedFilters] =
     useState<AdvancedFilterGroup | null>(null);
 
-  const [advancedSorts, setAdvancedSorts] = useState<AdvancedSortItem[]>([]);
+  const [advancedSorts, setAdvancedSorts] =
+    useState<AdvancedSortItem[]>([]);
 
   /* ==========================================================
      CRUD MODALS
   ========================================================== */
 
-  const [createModalOpen, setCreateModalOpen] = useState(false);
+  const [createModalOpen, setCreateModalOpen] =
+    useState(false);
 
-  const [editModalOpen, setEditModalOpen] = useState(false);
+  const [editModalOpen, setEditModalOpen] =
+    useState(false);
 
   const [selectedEnrollment, setSelectedEnrollment] =
     useState<Enrollment | null>(null);
@@ -87,7 +102,15 @@ export default function EnrollmentsPage() {
      DELETE STATE
   ========================================================== */
 
-  const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [deletingId, setDeletingId] =
+    useState<number | null>(null);
+
+  /* ==========================================================
+     EXPORT STATE
+  ========================================================== */
+
+  const [exporting, setExporting] =
+    useState(false);
 
   /* ==========================================================
      SEARCH DEBOUNCE
@@ -111,15 +134,10 @@ export default function EnrollmentsPage() {
   const queryParams = useMemo(
     () => ({
       page,
-
       pageSize,
-
       search,
-
       status,
-
       semester,
-
       academic_year: academicYear,
 
       /*
@@ -169,13 +187,89 @@ export default function EnrollmentsPage() {
      FETCH ENROLLMENTS
   ========================================================== */
 
-  const { data, meta, loading, error, refetch } = useEnrollments(queryParams);
+  const {
+    data,
+    meta,
+    loading,
+    error,
+    refetch,
+  } = useEnrollments(queryParams);
+
+  /* ==========================================================
+     EXPORT
+  ========================================================== */
+
+  async function handleExport() {
+    /*
+     * Jangan izinkan dua export berjalan bersamaan.
+     */
+    if (exporting) {
+      return;
+    }
+
+    try {
+      setExporting(true);
+
+      /*
+       * IMPORTANT:
+       *
+       * exportEnrollments() hanya dipanggil di sini,
+       * yaitu setelah user benar-benar menekan
+       * tombol Export CSV.
+       */
+      const blob =
+        await exportEnrollments(queryParams);
+
+      if (!blob || blob.size === 0) {
+        throw new Error(
+          "File export kosong.",
+        );
+      }
+
+      const url =
+        window.URL.createObjectURL(blob);
+
+      const anchor =
+        document.createElement("a");
+
+      anchor.href = url;
+
+      anchor.download =
+        `enrollments-${new Date()
+          .toISOString()
+          .slice(0, 10)}.csv`;
+
+      document.body.appendChild(anchor);
+
+      anchor.click();
+
+      anchor.remove();
+
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error(
+        "Failed to export enrollments:",
+        error,
+      );
+
+      window.alert(
+        getApiErrorMessage(
+          error,
+          "Gagal melakukan export data. Silakan coba lagi.",
+        ),
+      );
+    } finally {
+      setExporting(false);
+    }
+  }
 
   /* ==========================================================
      TABLE SORT
   ========================================================== */
 
-  function handleSort(column: EnrollmentSort) {
+  function handleSort(
+    column: EnrollmentSort,
+  ) {
     /*
      * Kalau advanced ordering sedang aktif,
      * klik sorting table akan kembali ke
@@ -188,7 +282,11 @@ export default function EnrollmentsPage() {
     setPage(1);
 
     if (sort === column) {
-      setDirection((current) => (current === "asc" ? "desc" : "asc"));
+      setDirection((current) =>
+        current === "asc"
+          ? "desc"
+          : "asc",
+      );
 
       return;
     }
@@ -201,17 +299,23 @@ export default function EnrollmentsPage() {
      QUICK FILTER HANDLERS
   ========================================================== */
 
-  function handleStatusChange(value: EnrollmentStatus | "") {
+  function handleStatusChange(
+    value: EnrollmentStatus | "",
+  ) {
     setStatus(value);
     setPage(1);
   }
 
-  function handleSemesterChange(value: Semester | "") {
+  function handleSemesterChange(
+    value: Semester | "",
+  ) {
     setSemester(value);
     setPage(1);
   }
 
-  function handleAcademicYearChange(value: string) {
+  function handleAcademicYearChange(
+    value: string,
+  ) {
     setAcademicYear(value);
     setPage(1);
   }
@@ -220,7 +324,9 @@ export default function EnrollmentsPage() {
      PAGE SIZE
   ========================================================== */
 
-  function handlePageSizeChange(newPageSize: number) {
+  function handlePageSizeChange(
+    newPageSize: number,
+  ) {
     setPageSize(newPageSize);
     setPage(1);
   }
@@ -236,9 +342,6 @@ export default function EnrollmentsPage() {
     setAdvancedFilters(filters);
     setAdvancedSorts(sorts);
 
-    /*
-     * Query berubah -> kembali ke page 1.
-     */
     setPage(1);
 
     setAdvancedQueryOpen(false);
@@ -259,34 +362,19 @@ export default function EnrollmentsPage() {
   ========================================================== */
 
   function handleReset() {
-    /*
-     * Search
-     */
     setSearchInput("");
     setSearch("");
 
-    /*
-     * Quick filters
-     */
     setStatus("");
     setSemester("");
     setAcademicYear("");
 
-    /*
-     * Legacy sorting
-     */
     setSort("created_at");
     setDirection("desc");
 
-    /*
-     * Advanced query
-     */
     setAdvancedFilters(null);
     setAdvancedSorts([]);
 
-    /*
-     * Pagination
-     */
     setPage(1);
   }
 
@@ -301,10 +389,6 @@ export default function EnrollmentsPage() {
   function handleCreated() {
     setCreateModalOpen(false);
 
-    /*
-     * Setelah create, tampilkan data
-     * dari page pertama.
-     */
     setPage(1);
 
     refetch();
@@ -314,7 +398,9 @@ export default function EnrollmentsPage() {
      EDIT
   ========================================================== */
 
-  function handleEdit(enrollment: Enrollment) {
+  function handleEdit(
+    enrollment: Enrollment,
+  ) {
     setSelectedEnrollment(enrollment);
     setEditModalOpen(true);
   }
@@ -335,26 +421,25 @@ export default function EnrollmentsPage() {
      DELETE
   ========================================================== */
 
-  async function handleDelete(enrollment: Enrollment) {
-    /*
-     * Jangan izinkan delete request
-     * bersamaan untuk row yang sama.
-     */
+  async function handleDelete(
+    enrollment: Enrollment,
+  ) {
     if (deletingId !== null) {
       return;
     }
 
-    const confirmed = window.confirm(
-      [
-        "Yakin ingin menghapus enrollment ini?",
-        "",
-        `NIM: ${enrollment.student_nim}`,
-        `Student: ${enrollment.student_name}`,
-        `Course: ${enrollment.course_code} - ${enrollment.course_name}`,
-        `Academic Year: ${enrollment.academic_year}`,
-        `Semester: ${enrollment.semester}`,
-      ].join("\n"),
-    );
+    const confirmed =
+      window.confirm(
+        [
+          "Yakin ingin menghapus enrollment ini?",
+          "",
+          `NIM: ${enrollment.student_nim}`,
+          `Student: ${enrollment.student_name}`,
+          `Course: ${enrollment.course_code} - ${enrollment.course_name}`,
+          `Academic Year: ${enrollment.academic_year}`,
+          `Semester: ${enrollment.semester}`,
+        ].join("\n"),
+      );
 
     if (!confirmed) {
       return;
@@ -363,14 +448,16 @@ export default function EnrollmentsPage() {
     try {
       setDeletingId(enrollment.id);
 
-      await deleteEnrollment(enrollment.id);
+      await deleteEnrollment(
+        enrollment.id,
+      );
 
-      /*
-       * Refresh data setelah delete.
-       */
       refetch();
     } catch (error) {
-      console.error("Failed to delete enrollment:", error);
+      console.error(
+        "Failed to delete enrollment:",
+        error,
+      );
 
       window.alert(
         getApiErrorMessage(
@@ -388,7 +475,8 @@ export default function EnrollmentsPage() {
   ========================================================== */
 
   const advancedQueryActive =
-    advancedFilters !== null || advancedSorts.length > 0;
+    advancedFilters !== null ||
+    advancedSorts.length > 0;
 
   /* ==========================================================
      RENDER
@@ -398,13 +486,16 @@ export default function EnrollmentsPage() {
     <main className="min-h-screen bg-slate-50">
       <div className="mx-auto w-full max-w-[1600px] px-4 py-6 sm:px-6 lg:px-8">
         <div className="space-y-6">
+
           {/* ==================================================
               HEADER
           ================================================== */}
 
           <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
             <div>
-              <p className="text-sm font-medium text-slate-500">Academic KRS</p>
+              <p className="text-sm font-medium text-slate-500">
+                Academic KRS
+              </p>
 
               <h1 className="mt-1 text-2xl font-bold tracking-tight text-slate-950 sm:text-3xl">
                 Enrollment Management
@@ -415,8 +506,6 @@ export default function EnrollmentsPage() {
                 enrollments.
               </p>
             </div>
-
-            {/* CREATE BUTTON */}
 
             <button
               type="button"
@@ -439,11 +528,19 @@ export default function EnrollmentsPage() {
             onSearchChange={setSearchInput}
             onStatusChange={handleStatusChange}
             onSemesterChange={handleSemesterChange}
-            onAcademicYearChange={handleAcademicYearChange}
+            onAcademicYearChange={
+              handleAcademicYearChange
+            }
             onReset={handleReset}
-            onAdvancedQuery={() => setAdvancedQueryOpen(true)}
-            advancedQueryActive={advancedQueryActive}
+            onAdvancedQuery={() =>
+              setAdvancedQueryOpen(true)
+            }
+            advancedQueryActive={
+              advancedQueryActive
+            }
             onCreate={handleCreate}
+            onExport={handleExport}
+            exporting={exporting}
           />
 
           {/* ==================================================
@@ -460,7 +557,9 @@ export default function EnrollmentsPage() {
                 {advancedFilters && (
                   <span className="text-xs text-slate-500">
                     {advancedFilters.items.length} filter condition
-                    {advancedFilters.items.length !== 1 ? "s" : ""}
+                    {advancedFilters.items.length !== 1
+                      ? "s"
+                      : ""}
                     {" · "}
                     Logic:{" "}
                     <span className="font-semibold text-slate-700">
@@ -472,14 +571,18 @@ export default function EnrollmentsPage() {
                 {advancedSorts.length > 0 && (
                   <span className="text-xs text-slate-500">
                     {advancedSorts.length} ordering level
-                    {advancedSorts.length !== 1 ? "s" : ""}
+                    {advancedSorts.length !== 1
+                      ? "s"
+                      : ""}
                   </span>
                 )}
               </div>
 
               <button
                 type="button"
-                onClick={handleClearAdvancedQuery}
+                onClick={
+                  handleClearAdvancedQuery
+                }
                 className="text-left text-sm font-medium text-slate-600 transition hover:text-slate-950 sm:text-right"
               >
                 Clear advanced query
@@ -497,7 +600,9 @@ export default function EnrollmentsPage() {
                 Failed to load enrollments
               </div>
 
-              <div className="mt-1 text-sm text-red-700">{error}</div>
+              <div className="mt-1 text-sm text-red-700">
+                {error}
+              </div>
             </div>
           )}
 
@@ -524,19 +629,37 @@ export default function EnrollmentsPage() {
               currentPage={meta.current_page}
               from={meta.from}
               to={meta.to}
-              hasMorePages={meta.has_more_pages}
-              loading={loading || deletingId !== null}
+              hasMorePages={
+                meta.has_more_pages
+              }
+              loading={
+                loading ||
+                deletingId !== null ||
+                exporting
+              }
               pageSize={pageSize}
-              onPageSizeChange={handlePageSizeChange}
+              onPageSizeChange={
+                handlePageSizeChange
+              }
               onPrevious={() => {
-                setPage((current) => Math.max(1, current - 1));
+                setPage((current) =>
+                  Math.max(
+                    1,
+                    current - 1,
+                  ),
+                );
               }}
               onNext={() => {
-                if (!meta.has_more_pages) {
+                if (
+                  !meta.has_more_pages
+                ) {
                   return;
                 }
 
-                setPage((current) => current + 1);
+                setPage(
+                  (current) =>
+                    current + 1,
+                );
               }}
             />
           )}
@@ -549,7 +672,9 @@ export default function EnrollmentsPage() {
 
       <CreateEnrollmentModal
         open={createModalOpen}
-        onClose={() => setCreateModalOpen(false)}
+        onClose={() =>
+          setCreateModalOpen(false)
+        }
         onCreated={handleCreated}
       />
 
@@ -572,8 +697,12 @@ export default function EnrollmentsPage() {
         open={advancedQueryOpen}
         initialFilters={advancedFilters}
         initialSorts={advancedSorts}
-        onClose={() => setAdvancedQueryOpen(false)}
-        onApply={handleAdvancedQueryApply}
+        onClose={() =>
+          setAdvancedQueryOpen(false)
+        }
+        onApply={
+          handleAdvancedQueryApply
+        }
       />
     </main>
   );
