@@ -2,45 +2,50 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-import EnrollmentFormModal from "@/components/enrollments/EnrollmentFormModal";
+import AdvancedQueryModal from "@/components/enrollments/AdvancedQueryModal";
+import CreateEnrollmentModal from "@/components/enrollments/CreateEnrollmentModal";
+import EditEnrollmentModal from "@/components/enrollments/EditEnrollmentModal";
 import EnrollmentPagination from "@/components/enrollments/EnrollmentPagination";
 import EnrollmentTable from "@/components/enrollments/EnrollmentTable";
 import EnrollmentToolbar from "@/components/enrollments/EnrollmentToolbar";
 
 import { useEnrollments } from "@/hooks/useEnrollments";
 
-import {
-  createEnrollment,
-  deleteEnrollment,
-  updateEnrollment,
-} from "@/lib/enrollments";
+import { deleteEnrollment } from "@/lib/enrollments";
+
+import { getApiErrorMessage } from "@/lib/error";
 
 import type {
+  AdvancedFilterGroup,
+  AdvancedSortItem,
   Enrollment,
   EnrollmentSort,
   EnrollmentStatus,
   Semester,
 } from "@/types/enrollment";
 
-// const PAGE_SIZE = 25;
-
-type MutationErrorResponse = {
-  response?: {
-    status?: number;
-    data?: {
-      message?: string;
-      errors?: Record<string, string[] | string>;
-    };
-  };
-};
+const DEFAULT_PAGE_SIZE = 25;
 
 export default function EnrollmentsPage() {
+  /* ==========================================================
+     PAGINATION
+  ========================================================== */
+
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(25);
+
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+
+  /* ==========================================================
+     SEARCH
+  ========================================================== */
 
   const [searchInput, setSearchInput] = useState("");
 
   const [search, setSearch] = useState("");
+
+  /* ==========================================================
+     QUICK FILTERS
+  ========================================================== */
 
   const [status, setStatus] = useState<EnrollmentStatus | "">("");
 
@@ -48,45 +53,46 @@ export default function EnrollmentsPage() {
 
   const [academicYear, setAcademicYear] = useState("");
 
+  /* ==========================================================
+     LEGACY TABLE SORTING
+  ========================================================== */
+
   const [sort, setSort] = useState<EnrollmentSort>("created_at");
 
   const [direction, setDirection] = useState<"asc" | "desc">("desc");
 
-  /*
-   * CRUD modal state
-   */
-  const [modalOpen, setModalOpen] = useState(false);
+  /* ==========================================================
+     ADVANCED QUERY
+  ========================================================== */
 
-  const [modalMode, setModalMode] = useState<"create" | "edit">("create");
+  const [advancedQueryOpen, setAdvancedQueryOpen] = useState(false);
+
+  const [advancedFilters, setAdvancedFilters] =
+    useState<AdvancedFilterGroup | null>(null);
+
+  const [advancedSorts, setAdvancedSorts] = useState<AdvancedSortItem[]>([]);
+
+  /* ==========================================================
+     CRUD MODALS
+  ========================================================== */
+
+  const [createModalOpen, setCreateModalOpen] = useState(false);
+
+  const [editModalOpen, setEditModalOpen] = useState(false);
 
   const [selectedEnrollment, setSelectedEnrollment] =
     useState<Enrollment | null>(null);
 
-  /*
-   * Create / Update state
-   */
-  const [mutationLoading, setMutationLoading] = useState(false);
+  /* ==========================================================
+     DELETE STATE
+  ========================================================== */
 
-  const [mutationError, setMutationError] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
 
-  /*
-   * Delete state
-   */
-  const [deleteTarget, setDeleteTarget] = useState<Enrollment | null>(null);
+  /* ==========================================================
+     SEARCH DEBOUNCE
+  ========================================================== */
 
-  const [deleteLoading, setDeleteLoading] = useState(false);
-
-  /*
-   * Global feedback
-   */
-  const [feedback, setFeedback] = useState<{
-    type: "success" | "error";
-    message: string;
-  } | null>(null);
-
-  /*
-   * Debounce search.
-   */
   useEffect(() => {
     const timer = window.setTimeout(() => {
       setSearch(searchInput);
@@ -98,46 +104,87 @@ export default function EnrollmentsPage() {
     };
   }, [searchInput]);
 
-  /*
-   * Auto-hide feedback.
-   */
-  useEffect(() => {
-    if (!feedback) {
-      return;
-    }
+  /* ==========================================================
+     QUERY PARAMS
+  ========================================================== */
 
-    const timer = window.setTimeout(() => {
-      setFeedback(null);
-    }, 4000);
-
-    return () => {
-      window.clearTimeout(timer);
-    };
-  }, [feedback]);
-
-  /*
-   * Stable query object.
-   */
   const queryParams = useMemo(
     () => ({
       page,
-      page_size: pageSize,
+
+      pageSize,
+
+      search,
+
+      status,
+
+      semester,
+
+      academic_year: academicYear,
+
+      /*
+       * Legacy sorting hanya dikirim apabila
+       * advanced sorting tidak aktif.
+       */
+      ...(advancedSorts.length === 0
+        ? {
+            sort,
+            direction,
+          }
+        : {}),
+
+      /*
+       * Advanced filters.
+       */
+      ...(advancedFilters
+        ? {
+            filters: advancedFilters,
+          }
+        : {}),
+
+      /*
+       * Advanced multi-column ordering.
+       */
+      ...(advancedSorts.length > 0
+        ? {
+            sorts: advancedSorts,
+          }
+        : {}),
+    }),
+    [
+      page,
+      pageSize,
       search,
       status,
       semester,
-      academic_year: academicYear,
+      academicYear,
       sort,
       direction,
-    }),
-    [page, pageSize, search, status, semester, academicYear, sort, direction],
+      advancedFilters,
+      advancedSorts,
+    ],
   );
+
+  /* ==========================================================
+     FETCH ENROLLMENTS
+  ========================================================== */
 
   const { data, meta, loading, error, refetch } = useEnrollments(queryParams);
 
-  /*
-   * Sorting
-   */
+  /* ==========================================================
+     TABLE SORT
+  ========================================================== */
+
   function handleSort(column: EnrollmentSort) {
+    /*
+     * Kalau advanced ordering sedang aktif,
+     * klik sorting table akan kembali ke
+     * legacy/simple sorting.
+     */
+    if (advancedSorts.length > 0) {
+      setAdvancedSorts([]);
+    }
+
     setPage(1);
 
     if (sort === column) {
@@ -150,9 +197,10 @@ export default function EnrollmentsPage() {
     setDirection("asc");
   }
 
-  /*
-   * Filters
-   */
+  /* ==========================================================
+     QUICK FILTER HANDLERS
+  ========================================================== */
+
   function handleStatusChange(value: EnrollmentStatus | "") {
     setStatus(value);
     setPage(1);
@@ -167,249 +215,193 @@ export default function EnrollmentsPage() {
     setAcademicYear(value);
     setPage(1);
   }
-  function handlePageSizeChange(value: number) {
-    setPageSize(value);
+
+  /* ==========================================================
+     PAGE SIZE
+  ========================================================== */
+
+  function handlePageSizeChange(newPageSize: number) {
+    setPageSize(newPageSize);
     setPage(1);
   }
 
+  /* ==========================================================
+     ADVANCED QUERY
+  ========================================================== */
+
+  function handleAdvancedQueryApply(
+    filters: AdvancedFilterGroup | null,
+    sorts: AdvancedSortItem[],
+  ) {
+    setAdvancedFilters(filters);
+    setAdvancedSorts(sorts);
+
+    /*
+     * Query berubah -> kembali ke page 1.
+     */
+    setPage(1);
+
+    setAdvancedQueryOpen(false);
+  }
+
+  /* ==========================================================
+     CLEAR ADVANCED QUERY
+  ========================================================== */
+
+  function handleClearAdvancedQuery() {
+    setAdvancedFilters(null);
+    setAdvancedSorts([]);
+    setPage(1);
+  }
+
+  /* ==========================================================
+     RESET EVERYTHING
+  ========================================================== */
+
   function handleReset() {
+    /*
+     * Search
+     */
     setSearchInput("");
     setSearch("");
 
+    /*
+     * Quick filters
+     */
     setStatus("");
     setSemester("");
     setAcademicYear("");
 
+    /*
+     * Legacy sorting
+     */
     setSort("created_at");
     setDirection("desc");
 
+    /*
+     * Advanced query
+     */
+    setAdvancedFilters(null);
+    setAdvancedSorts([]);
+
+    /*
+     * Pagination
+     */
     setPage(1);
   }
 
-  /*
-   * API error normalizer
-   */
-  function getApiErrorMessage(error: unknown, fallback: string): string {
-    if (typeof error === "object" && error !== null && "response" in error) {
-      const axiosError = error as MutationErrorResponse;
+  /* ==========================================================
+     CREATE
+  ========================================================== */
 
-      const response = axiosError.response;
-
-      /*
-       * Duplicate enrollment
-       */
-      if (response?.status === 409) {
-        return (
-          response.data?.message ??
-          "Enrollment sudah terdaftar untuk kombinasi tersebut."
-        );
-      }
-
-      /*
-       * Validation error
-       */
-      if (response?.status === 422) {
-        const errors = response.data?.errors;
-
-        if (errors) {
-          const firstError = Object.values(errors)
-            .flat()
-            .find((message) => typeof message === "string");
-
-          if (firstError) {
-            return firstError;
-          }
-        }
-
-        return response.data?.message ?? "Data yang dikirim tidak valid.";
-      }
-
-      /*
-       * Not found
-       */
-      if (response?.status === 404) {
-        return response.data?.message ?? "Enrollment tidak ditemukan.";
-      }
-
-      return response.data?.message ?? fallback;
-    }
-
-    if (error instanceof Error) {
-      return error.message;
-    }
-
-    return fallback;
+  function handleCreate() {
+    setCreateModalOpen(true);
   }
 
-  /*
-   * CREATE
-   */
-  function openCreateModal() {
-    setMutationError(null);
-    setSelectedEnrollment(null);
-    setModalMode("create");
-    setModalOpen(true);
+  function handleCreated() {
+    setCreateModalOpen(false);
+
+    /*
+     * Setelah create, tampilkan data
+     * dari page pertama.
+     */
+    setPage(1);
+
+    refetch();
   }
 
-  /*
-   * EDIT
-   */
-  function openEditModal(enrollment: Enrollment) {
-    setMutationError(null);
+  /* ==========================================================
+     EDIT
+  ========================================================== */
+
+  function handleEdit(enrollment: Enrollment) {
     setSelectedEnrollment(enrollment);
-    setModalMode("edit");
-    setModalOpen(true);
+    setEditModalOpen(true);
   }
 
-  function closeModal() {
-    if (mutationLoading) {
+  function handleEditClose() {
+    setEditModalOpen(false);
+    setSelectedEnrollment(null);
+  }
+
+  function handleUpdated() {
+    setEditModalOpen(false);
+    setSelectedEnrollment(null);
+
+    refetch();
+  }
+
+  /* ==========================================================
+     DELETE
+  ========================================================== */
+
+  async function handleDelete(enrollment: Enrollment) {
+    /*
+     * Jangan izinkan delete request
+     * bersamaan untuk row yang sama.
+     */
+    if (deletingId !== null) {
       return;
     }
 
-    setModalOpen(false);
-    setSelectedEnrollment(null);
-    setMutationError(null);
-  }
+    const confirmed = window.confirm(
+      [
+        "Yakin ingin menghapus enrollment ini?",
+        "",
+        `NIM: ${enrollment.student_nim}`,
+        `Student: ${enrollment.student_name}`,
+        `Course: ${enrollment.course_code} - ${enrollment.course_name}`,
+        `Academic Year: ${enrollment.academic_year}`,
+        `Semester: ${enrollment.semester}`,
+      ].join("\n"),
+    );
 
-  async function handleCreate(payload: {
-    student: {
-      nim: string;
-      name: string;
-      email: string;
-    };
-
-    course: {
-      code: string;
-      name: string;
-      credits: number;
-    };
-
-    academic_year: string;
-    semester: Semester;
-    status: EnrollmentStatus;
-  }) {
-    setMutationLoading(true);
-    setMutationError(null);
+    if (!confirmed) {
+      return;
+    }
 
     try {
-      await createEnrollment(payload);
+      setDeletingId(enrollment.id);
 
-      setModalOpen(false);
-      setSelectedEnrollment(null);
-
-      setFeedback({
-        type: "success",
-        message: "Enrollment berhasil dibuat.",
-      });
+      await deleteEnrollment(enrollment.id);
 
       /*
-       * Return to first page so the newly
-       * created enrollment can be visible.
+       * Refresh data setelah delete.
        */
-      setPage(1);
-
       refetch();
     } catch (error) {
-      setMutationError(getApiErrorMessage(error, "Gagal membuat enrollment."));
-    } finally {
-      setMutationLoading(false);
-    }
-  }
+      console.error("Failed to delete enrollment:", error);
 
-  /*
-   * UPDATE
-   */
-  async function handleUpdate(payload: {
-    academic_year: string;
-    semester: Semester;
-    status: EnrollmentStatus;
-  }) {
-    if (!selectedEnrollment) {
-      return;
-    }
-
-    setMutationLoading(true);
-    setMutationError(null);
-
-    try {
-      await updateEnrollment(selectedEnrollment.id, payload);
-
-      setModalOpen(false);
-      setSelectedEnrollment(null);
-
-      setFeedback({
-        type: "success",
-        message: "Enrollment berhasil diperbarui.",
-      });
-
-      refetch();
-    } catch (error) {
-      setMutationError(
-        getApiErrorMessage(error, "Gagal memperbarui enrollment."),
+      window.alert(
+        getApiErrorMessage(
+          error,
+          "Gagal menghapus enrollment. Silakan coba lagi.",
+        ),
       );
     } finally {
-      setMutationLoading(false);
+      setDeletingId(null);
     }
   }
 
-  /*
-   * DELETE
-   */
-  function openDeleteDialog(enrollment: Enrollment) {
-    setDeleteTarget(enrollment);
-  }
+  /* ==========================================================
+     ADVANCED QUERY ACTIVE
+  ========================================================== */
 
-  function closeDeleteDialog() {
-    if (deleteLoading) {
-      return;
-    }
+  const advancedQueryActive =
+    advancedFilters !== null || advancedSorts.length > 0;
 
-    setDeleteTarget(null);
-  }
-
-  async function handleDelete() {
-    if (!deleteTarget) {
-      return;
-    }
-
-    setDeleteLoading(true);
-
-    try {
-      await deleteEnrollment(deleteTarget.id);
-
-      setDeleteTarget(null);
-
-      setFeedback({
-        type: "success",
-        message: "Enrollment berhasil dihapus.",
-      });
-
-      /*
-       * If the current page had only one row,
-       * move back one page.
-       */
-      if (data.length === 1 && page > 1) {
-        setPage((current) => Math.max(1, current - 1));
-      }
-
-      refetch();
-    } catch (error) {
-      setFeedback({
-        type: "error",
-        message: getApiErrorMessage(error, "Gagal menghapus enrollment."),
-      });
-    } finally {
-      setDeleteLoading(false);
-    }
-  }
+  /* ==========================================================
+     RENDER
+  ========================================================== */
 
   return (
     <main className="min-h-screen bg-slate-50">
       <div className="mx-auto w-full max-w-[1600px] px-4 py-6 sm:px-6 lg:px-8">
         <div className="space-y-6">
-          {/* =========================
+          {/* ==================================================
               HEADER
-          ========================= */}
+          ================================================== */}
+
           <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
             <div>
               <p className="text-sm font-medium text-slate-500">Academic KRS</p>
@@ -424,43 +416,21 @@ export default function EnrollmentsPage() {
               </p>
             </div>
 
-            {/* ADD ENROLLMENT */}
+            {/* CREATE BUTTON */}
+
             <button
               type="button"
-              onClick={openCreateModal}
-              className="inline-flex h-10 shrink-0 items-center justify-center rounded-lg bg-slate-950 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2"
+              onClick={handleCreate}
+              className="inline-flex h-10 items-center justify-center rounded-lg bg-slate-950 px-5 text-sm font-semibold text-white transition hover:bg-slate-800"
             >
-              <span className="mr-2 text-base">+</span>
-              Add Enrollment
+              + Tambah
             </button>
           </div>
 
-          {/* =========================
-              FEEDBACK
-          ========================= */}
-          {feedback && (
-            <div
-              className={`rounded-xl border px-4 py-3 ${
-                feedback.type === "success"
-                  ? "border-emerald-200 bg-emerald-50"
-                  : "border-red-200 bg-red-50"
-              }`}
-            >
-              <div
-                className={`text-sm font-medium ${
-                  feedback.type === "success"
-                    ? "text-emerald-800"
-                    : "text-red-800"
-                }`}
-              >
-                {feedback.message}
-              </div>
-            </div>
-          )}
+          {/* ==================================================
+              TOOLBAR
+          ================================================== */}
 
-          {/* =========================
-              FILTER / SEARCH
-          ========================= */}
           <EnrollmentToolbar
             search={searchInput}
             status={status}
@@ -471,11 +441,56 @@ export default function EnrollmentsPage() {
             onSemesterChange={handleSemesterChange}
             onAcademicYearChange={handleAcademicYearChange}
             onReset={handleReset}
+            onAdvancedQuery={() => setAdvancedQueryOpen(true)}
+            advancedQueryActive={advancedQueryActive}
+            onCreate={handleCreate}
           />
 
-          {/* =========================
-              LIST ERROR
-          ========================= */}
+          {/* ==================================================
+              ACTIVE ADVANCED QUERY SUMMARY
+          ================================================== */}
+
+          {advancedQueryActive && (
+            <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="rounded-full bg-slate-950 px-2.5 py-1 text-xs font-semibold text-white">
+                  Advanced Query Active
+                </span>
+
+                {advancedFilters && (
+                  <span className="text-xs text-slate-500">
+                    {advancedFilters.items.length} filter condition
+                    {advancedFilters.items.length !== 1 ? "s" : ""}
+                    {" · "}
+                    Logic:{" "}
+                    <span className="font-semibold text-slate-700">
+                      {advancedFilters.logic}
+                    </span>
+                  </span>
+                )}
+
+                {advancedSorts.length > 0 && (
+                  <span className="text-xs text-slate-500">
+                    {advancedSorts.length} ordering level
+                    {advancedSorts.length !== 1 ? "s" : ""}
+                  </span>
+                )}
+              </div>
+
+              <button
+                type="button"
+                onClick={handleClearAdvancedQuery}
+                className="text-left text-sm font-medium text-slate-600 transition hover:text-slate-950 sm:text-right"
+              >
+                Clear advanced query
+              </button>
+            </div>
+          )}
+
+          {/* ==================================================
+              ERROR
+          ================================================== */}
+
           {error && (
             <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3">
               <div className="text-sm font-semibold text-red-800">
@@ -486,108 +501,80 @@ export default function EnrollmentsPage() {
             </div>
           )}
 
-          {/* =========================
+          {/* ==================================================
               TABLE
-          ========================= */}
+          ================================================== */}
+
           <EnrollmentTable
             data={data}
             loading={loading}
             sort={sort}
             direction={direction}
             onSort={handleSort}
-            onEdit={openEditModal}
-            onDelete={openDeleteDialog}
+            onEdit={handleEdit}
+            onDelete={handleDelete}
           />
 
-          {/* =========================
+          {/* ==================================================
               PAGINATION
-          ========================= */}
+          ================================================== */}
+
           {meta && (
             <EnrollmentPagination
               currentPage={meta.current_page}
               from={meta.from}
               to={meta.to}
               hasMorePages={meta.has_more_pages}
-              loading={loading}
+              loading={loading || deletingId !== null}
               pageSize={pageSize}
               onPageSizeChange={handlePageSizeChange}
-              onPrevious={() => setPage((current) => Math.max(1, current - 1))}
-              onNext={() => setPage((current) => current + 1)}
+              onPrevious={() => {
+                setPage((current) => Math.max(1, current - 1));
+              }}
+              onNext={() => {
+                if (!meta.has_more_pages) {
+                  return;
+                }
+
+                setPage((current) => current + 1);
+              }}
             />
           )}
         </div>
       </div>
 
-      {/* =========================
-          CREATE / EDIT MODAL
-      ========================= */}
-      <EnrollmentFormModal
-        open={modalOpen}
-        mode={modalMode}
-        enrollment={selectedEnrollment}
-        submitting={mutationLoading}
-        error={mutationError}
-        onClose={closeModal}
-        onCreate={handleCreate}
-        onUpdate={handleUpdate}
+      {/* ====================================================
+          CREATE MODAL
+      ==================================================== */}
+
+      <CreateEnrollmentModal
+        open={createModalOpen}
+        onClose={() => setCreateModalOpen(false)}
+        onCreated={handleCreated}
       />
 
-      {/* =========================
-          DELETE CONFIRMATION
-      ========================= */}
-      {deleteTarget && (
-        <div
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/40 p-4"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="delete-dialog-title"
-        >
-          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
-            <h2
-              id="delete-dialog-title"
-              className="text-lg font-bold text-slate-950"
-            >
-              Delete Enrollment?
-            </h2>
+      {/* ====================================================
+          EDIT MODAL
+      ==================================================== */}
 
-            <p className="mt-2 text-sm leading-6 text-slate-600">
-              Enrollment{" "}
-              <span className="font-semibold text-slate-900">
-                {deleteTarget.student_nim}
-              </span>{" "}
-              untuk course{" "}
-              <span className="font-semibold text-slate-900">
-                {deleteTarget.course_code}
-              </span>{" "}
-              akan dihapus.
-            </p>
+      <EditEnrollmentModal
+        open={editModalOpen}
+        enrollment={selectedEnrollment}
+        onClose={handleEditClose}
+        onUpdated={handleUpdated}
+      />
 
-            <p className="mt-2 text-xs text-slate-500">
-              Student dan course tidak akan ikut dihapus.
-            </p>
+      {/* ====================================================
+          ADVANCED QUERY MODAL
+      ==================================================== */}
 
-            <div className="mt-6 flex justify-end gap-3">
-              <button
-                type="button"
-                onClick={closeDeleteDialog}
-                disabled={deleteLoading}
-                className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                Cancel
-              </button>
-
-              <button
-                type="button"
-                onClick={handleDelete}
-                disabled={deleteLoading}
-                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {deleteLoading ? "Deleting..." : "Delete"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <AdvancedQueryModal
+        open={advancedQueryOpen}
+        initialFilters={advancedFilters}
+        initialSorts={advancedSorts}
+        onClose={() => setAdvancedQueryOpen(false)}
+        onApply={handleAdvancedQueryApply}
+      />
     </main>
   );
 }

@@ -66,7 +66,10 @@ function LoadingRows() {
   return (
     <>
       {Array.from({ length: 8 }).map((_, index) => (
-        <tr key={index} className="animate-pulse">
+        <tr
+          key={index}
+          className="animate-pulse"
+        >
           {Array.from({ length: 8 }).map(
             (_, cellIndex) => (
               <td

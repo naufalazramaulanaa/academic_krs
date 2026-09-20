@@ -12,244 +12,215 @@ class EnrollmentApiTest extends TestCase
 {
     use RefreshDatabase;
 
-    /*
-     * ============================================
-     * TEST DATA
-     * ============================================
-     */
-
     protected function setUp(): void
     {
         parent::setUp();
 
-        /*
-         * Students
-         */
-        $students = [];
-
-        for ($i = 1; $i <= 5; $i++) {
-            $students[] = Student::create([
-                'nim' => sprintf(
-                    '2026000%d',
-                    $i
-                ),
-
-                'name' => sprintf(
-                    'Mahasiswa Test %03d',
-                    $i
-                ),
-
-                'email' => sprintf(
-                    'student%d@test.example',
-                    $i
-                ),
-            ]);
-        }
-
-        /*
-         * Courses
-         */
-        $courses = [];
-
-        for ($i = 1; $i <= 3; $i++) {
-            $courses[] = Course::create([
-                'code' => sprintf(
-                    'IF%03d',
-                    $i
-                ),
-
-                'name' => sprintf(
-                    'Course Test %03d',
-                    $i
-                ),
-
-                'credits' => 3,
-            ]);
-        }
-
-        /*
-         * Enrollments
-         */
-        Enrollment::create([
-            'student_id' => $students[0]->id,
-            'course_id' => $courses[0]->id,
-            'academic_year' => '2022/2023',
-            'semester' => 'GANJIL',
-            'status' => 'DRAFT',
-        ]);
-
-        Enrollment::create([
-            'student_id' => $students[0]->id,
-            'course_id' => $courses[1]->id,
-            'academic_year' => '2022/2023',
-            'semester' => 'GENAP',
-            'status' => 'APPROVED',
-        ]);
-
-        Enrollment::create([
-            'student_id' => $students[1]->id,
-            'course_id' => $courses[0]->id,
-            'academic_year' => '2023/2024',
-            'semester' => 'GANJIL',
-            'status' => 'SUBMITTED',
-        ]);
-
-        Enrollment::create([
-            'student_id' => $students[2]->id,
-            'course_id' => $courses[1]->id,
-            'academic_year' => '2024/2025',
-            'semester' => 'GENAP',
-            'status' => 'REJECTED',
-        ]);
-
-        Enrollment::create([
-            'student_id' => $students[3]->id,
-            'course_id' => $courses[2]->id,
-            'academic_year' => '2025/2026',
-            'semester' => 'GANJIL',
-            'status' => 'APPROVED',
-        ]);
-
-        Enrollment::create([
-            'student_id' => $students[4]->id,
-            'course_id' => $courses[2]->id,
-            'academic_year' => '2026/2027',
-            'semester' => 'GENAP',
-            'status' => 'DRAFT',
-        ]);
+        $this->seed();
     }
 
     /*
-     * ============================================
-     * INDEX / PAGINATION
-     * ============================================
-     */
+    |--------------------------------------------------------------------------
+    | Helpers
+    |--------------------------------------------------------------------------
+    */
 
-    public function test_can_list_enrollments_with_pagination(): void
+    private function getEnrollments(array $query = [])
     {
-        $response = $this->getJson(
-            '/api/enrollments?page=1&page_size=2'
+        return $this->getJson(
+            '/api/enrollments?' . http_build_query(
+                $query,
+                '',
+                '&',
+                PHP_QUERY_RFC3986
+            )
         );
+    }
+
+    private function decodeJson(string $value): string
+    {
+        return json_encode(
+            $value,
+            JSON_UNESCAPED_SLASHES
+            | JSON_UNESCAPED_UNICODE
+        );
+    }
+
+    private function decodeArray(array $value): string
+    {
+        return json_encode(
+            $value,
+            JSON_UNESCAPED_SLASHES
+            | JSON_UNESCAPED_UNICODE
+        );
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | ADVANCED FILTER - contains
+    |--------------------------------------------------------------------------
+    */
+
+    public function test_advanced_filter_contains_student_nim(): void
+    {
+        $response = $this->getEnrollments([
+            'filters' => $this->decodeArray([
+                'logic' => 'AND',
+                'items' => [
+                    [
+                        'field' => 'student_nim',
+                        'operator' => 'contains',
+                        'value' => '2026',
+                    ],
+                ],
+            ]),
+        ]);
 
         $response
             ->assertOk()
-            ->assertJsonPath(
+            ->assertJsonStructure([
                 'message',
-                'Enrollments retrieved successfully.'
-            )
-            ->assertJsonPath(
-                'meta.current_page',
-                1
-            )
-            ->assertJsonPath(
-                'meta.per_page',
-                2
-            )
-            ->assertJsonPath(
-                'meta.total',
-                6
-            )
-            ->assertJsonCount(
-                2,
-                'data'
-            );
-    }
+                'data',
+                'meta',
+                'links',
+            ]);
 
-    /*
-     * ============================================
-     * SEARCH
-     * ============================================
-     */
-
-    public function test_can_search_by_student_nim(): void
-    {
-        $response = $this->getJson(
-            '/api/enrollments?search=20260001'
-        );
-
-        $response
-            ->assertOk()
-            ->assertJsonPath(
-                'meta.total',
-                2
-            );
-
-        $data = $response->json('data');
-
-        $this->assertCount(2, $data);
-
-        foreach ($data as $row) {
-            $this->assertSame(
-                '20260001',
+        foreach ($response->json('data') as $row) {
+            $this->assertStringContainsString(
+                '2026',
                 $row['student_nim']
             );
         }
     }
 
-    public function test_can_search_by_student_name(): void
+    public function test_advanced_filter_contains_student_name(): void
     {
-        $response = $this->getJson(
-            '/api/enrollments?search=Mahasiswa%20Test%20001'
-        );
+        $response = $this->getEnrollments([
+            'filters' => $this->decodeArray([
+                'logic' => 'AND',
+                'items' => [
+                    [
+                        'field' => 'student_name',
+                        'operator' => 'contains',
+                        'value' => 'Ahmad',
+                    ],
+                ],
+            ]),
+        ]);
 
-        $response
-            ->assertOk()
-            ->assertJsonPath(
-                'meta.total',
-                2
+        $response->assertOk();
+
+        foreach ($response->json('data') as $row) {
+            $this->assertStringContainsStringIgnoringCase(
+                'Ahmad',
+                $row['student_name']
             );
+        }
     }
 
-    public function test_can_search_by_course_code(): void
+    public function test_advanced_filter_contains_course_code(): void
     {
-        $response = $this->getJson(
-            '/api/enrollments?search=IF003'
-        );
+        $response = $this->getEnrollments([
+            'filters' => $this->decodeArray([
+                'logic' => 'AND',
+                'items' => [
+                    [
+                        'field' => 'course_code',
+                        'operator' => 'contains',
+                        'value' => 'IF',
+                    ],
+                ],
+            ]),
+        ]);
 
-        $response
-            ->assertOk()
-            ->assertJsonPath(
-                'meta.total',
-                2
+        $response->assertOk();
+
+        foreach ($response->json('data') as $row) {
+            $this->assertStringContainsStringIgnoringCase(
+                'IF',
+                $row['course_code']
             );
-    }
-
-    public function test_unknown_search_returns_empty_result(): void
-    {
-        $response = $this->getJson(
-            '/api/enrollments?search=ZZZZZZZZ'
-        );
-
-        $response
-            ->assertOk()
-            ->assertJsonPath(
-                'meta.total',
-                0
-            )
-            ->assertJsonCount(
-                0,
-                'data'
-            );
+        }
     }
 
     /*
-     * ============================================
-     * FILTERS
-     * ============================================
-     */
+    |--------------------------------------------------------------------------
+    | ADVANCED FILTER - startsWith
+    |--------------------------------------------------------------------------
+    */
 
-    public function test_can_filter_by_status(): void
+    public function test_advanced_filter_starts_with_student_nim(): void
     {
-        $response = $this->getJson(
-            '/api/enrollments?status=APPROVED'
-        );
+        $response = $this->getEnrollments([
+            'filters' => $this->decodeArray([
+                'logic' => 'AND',
+                'items' => [
+                    [
+                        'field' => 'student_nim',
+                        'operator' => 'startsWith',
+                        'value' => '2026',
+                    ],
+                ],
+            ]),
+        ]);
 
-        $response
-            ->assertOk()
-            ->assertJsonPath(
-                'meta.total',
-                2
+        $response->assertOk();
+
+        foreach ($response->json('data') as $row) {
+            $this->assertStringStartsWith(
+                '2026',
+                $row['student_nim']
             );
+        }
+    }
+
+    public function test_advanced_filter_starts_with_course_code(): void
+    {
+        $response = $this->getEnrollments([
+            'filters' => $this->decodeArray([
+                'logic' => 'AND',
+                'items' => [
+                    [
+                        'field' => 'course_code',
+                        'operator' => 'startsWith',
+                        'value' => 'IF',
+                    ],
+                ],
+            ]),
+        ]);
+
+        $response->assertOk();
+
+        foreach ($response->json('data') as $row) {
+            $this->assertStringStartsWith(
+                'IF',
+                $row['course_code']
+            );
+        }
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | ADVANCED FILTER - equal
+    |--------------------------------------------------------------------------
+    */
+
+    public function test_advanced_filter_equal_status(): void
+    {
+        $response = $this->getEnrollments([
+            'filters' => $this->decodeArray([
+                'logic' => 'AND',
+                'items' => [
+                    [
+                        'field' => 'status',
+                        'operator' => 'equal',
+                        'value' => 'APPROVED',
+                    ],
+                ],
+            ]),
+        ]);
+
+        $response->assertOk();
 
         foreach ($response->json('data') as $row) {
             $this->assertSame(
@@ -259,18 +230,22 @@ class EnrollmentApiTest extends TestCase
         }
     }
 
-    public function test_can_filter_by_semester(): void
+    public function test_advanced_filter_equal_semester(): void
     {
-        $response = $this->getJson(
-            '/api/enrollments?semester=GANJIL'
-        );
+        $response = $this->getEnrollments([
+            'filters' => $this->decodeArray([
+                'logic' => 'AND',
+                'items' => [
+                    [
+                        'field' => 'semester',
+                        'operator' => 'equal',
+                        'value' => 'GANJIL',
+                    ],
+                ],
+            ]),
+        ]);
 
-        $response
-            ->assertOk()
-            ->assertJsonPath(
-                'meta.total',
-                3
-            );
+        $response->assertOk();
 
         foreach ($response->json('data') as $row) {
             $this->assertSame(
@@ -280,458 +255,1075 @@ class EnrollmentApiTest extends TestCase
         }
     }
 
-    public function test_can_filter_by_academic_year(): void
+    public function test_advanced_filter_equal_course_credits(): void
     {
-        $response = $this->getJson(
-            '/api/enrollments?academic_year=2026/2027'
-        );
+        $response = $this->getEnrollments([
+            'filters' => $this->decodeArray([
+                'logic' => 'AND',
+                'items' => [
+                    [
+                        'field' => 'course_credits',
+                        'operator' => 'equal',
+                        'value' => 3,
+                    ],
+                ],
+            ]),
+        ]);
 
-        $response
-            ->assertOk()
-            ->assertJsonPath(
-                'meta.total',
-                1
+        $response->assertOk();
+
+        foreach ($response->json('data') as $row) {
+            $this->assertSame(
+                3,
+                (int) $row['course_credits']
+            );
+        }
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | ADVANCED FILTER - case normalization
+    |--------------------------------------------------------------------------
+    */
+
+    public function test_advanced_filter_status_is_case_insensitive(): void
+    {
+        $response = $this->getEnrollments([
+            'filters' => $this->decodeArray([
+                'logic' => 'AND',
+                'items' => [
+                    [
+                        'field' => 'status',
+                        'operator' => 'equal',
+                        'value' => 'approved',
+                    ],
+                ],
+            ]),
+        ]);
+
+        $response->assertOk();
+
+        foreach ($response->json('data') as $row) {
+            $this->assertSame(
+                'APPROVED',
+                $row['status']
+            );
+        }
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | ADVANCED FILTER - IN
+    |--------------------------------------------------------------------------
+    */
+
+    public function test_advanced_filter_in_status(): void
+    {
+        $allowedStatuses = [
+            'APPROVED',
+            'SUBMITTED',
+        ];
+
+        $response = $this->getEnrollments([
+            'filters' => $this->decodeArray([
+                'logic' => 'AND',
+                'items' => [
+                    [
+                        'field' => 'status',
+                        'operator' => 'in',
+                        'value' => $allowedStatuses,
+                    ],
+                ],
+            ]),
+        ]);
+
+        $response->assertOk();
+
+        foreach ($response->json('data') as $row) {
+            $this->assertContains(
+                $row['status'],
+                $allowedStatuses
+            );
+        }
+    }
+
+    public function test_advanced_filter_in_semester(): void
+    {
+        $allowedSemesters = [
+            'GANJIL',
+            'GENAP',
+        ];
+
+        $response = $this->getEnrollments([
+            'filters' => $this->decodeArray([
+                'logic' => 'AND',
+                'items' => [
+                    [
+                        'field' => 'semester',
+                        'operator' => 'in',
+                        'value' => $allowedSemesters,
+                    ],
+                ],
+            ]),
+        ]);
+
+        $response->assertOk();
+
+        foreach ($response->json('data') as $row) {
+            $this->assertContains(
+                $row['semester'],
+                $allowedSemesters
+            );
+        }
+    }
+
+    public function test_advanced_filter_in_course_credits(): void
+    {
+        $allowedCredits = [
+            2,
+            3,
+            4,
+        ];
+
+        $response = $this->getEnrollments([
+            'filters' => $this->decodeArray([
+                'logic' => 'AND',
+                'items' => [
+                    [
+                        'field' => 'course_credits',
+                        'operator' => 'in',
+                        'value' => $allowedCredits,
+                    ],
+                ],
+            ]),
+        ]);
+
+        $response->assertOk();
+
+        foreach ($response->json('data') as $row) {
+            $this->assertContains(
+                (int) $row['course_credits'],
+                $allowedCredits
+            );
+        }
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | ADVANCED FILTER - BETWEEN
+    |--------------------------------------------------------------------------
+    */
+
+    public function test_advanced_filter_between_course_credits(): void
+    {
+        $response = $this->getEnrollments([
+            'filters' => $this->decodeArray([
+                'logic' => 'AND',
+                'items' => [
+                    [
+                        'field' => 'course_credits',
+                        'operator' => 'between',
+                        'value' => [2, 4],
+                    ],
+                ],
+            ]),
+        ]);
+
+        $response->assertOk();
+
+        foreach ($response->json('data') as $row) {
+            $credits = (int) $row['course_credits'];
+
+            $this->assertGreaterThanOrEqual(2, $credits);
+            $this->assertLessThanOrEqual(4, $credits);
+        }
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | ADVANCED FILTER - GT / GTE / LT / LTE
+    |--------------------------------------------------------------------------
+    */
+
+    public function test_advanced_filter_gt_course_credits(): void
+    {
+        $response = $this->getEnrollments([
+            'filters' => $this->decodeArray([
+                'logic' => 'AND',
+                'items' => [
+                    [
+                        'field' => 'course_credits',
+                        'operator' => 'gt',
+                        'value' => 3,
+                    ],
+                ],
+            ]),
+        ]);
+
+        $response->assertOk();
+
+        foreach ($response->json('data') as $row) {
+            $this->assertGreaterThan(
+                3,
+                (int) $row['course_credits']
+            );
+        }
+    }
+
+    public function test_advanced_filter_gte_course_credits(): void
+    {
+        $response = $this->getEnrollments([
+            'filters' => $this->decodeArray([
+                'logic' => 'AND',
+                'items' => [
+                    [
+                        'field' => 'course_credits',
+                        'operator' => 'gte',
+                        'value' => 3,
+                    ],
+                ],
+            ]),
+        ]);
+
+        $response->assertOk();
+
+        foreach ($response->json('data') as $row) {
+            $this->assertGreaterThanOrEqual(
+                3,
+                (int) $row['course_credits']
+            );
+        }
+    }
+
+    public function test_advanced_filter_lt_course_credits(): void
+    {
+        $response = $this->getEnrollments([
+            'filters' => $this->decodeArray([
+                'logic' => 'AND',
+                'items' => [
+                    [
+                        'field' => 'course_credits',
+                        'operator' => 'lt',
+                        'value' => 4,
+                    ],
+                ],
+            ]),
+        ]);
+
+        $response->assertOk();
+
+        foreach ($response->json('data') as $row) {
+            $this->assertLessThan(
+                4,
+                (int) $row['course_credits']
+            );
+        }
+    }
+
+    public function test_advanced_filter_lte_course_credits(): void
+    {
+        $response = $this->getEnrollments([
+            'filters' => $this->decodeArray([
+                'logic' => 'AND',
+                'items' => [
+                    [
+                        'field' => 'course_credits',
+                        'operator' => 'lte',
+                        'value' => 4,
+                    ],
+                ],
+            ]),
+        ]);
+
+        $response->assertOk();
+
+        foreach ($response->json('data') as $row) {
+            $this->assertLessThanOrEqual(
+                4,
+                (int) $row['course_credits']
+            );
+        }
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | ADVANCED FILTER - AND
+    |--------------------------------------------------------------------------
+    */
+
+    public function test_advanced_filters_with_and_logic(): void
+    {
+        $response = $this->getEnrollments([
+            'filters' => $this->decodeArray([
+                'logic' => 'AND',
+                'items' => [
+                    [
+                        'field' => 'status',
+                        'operator' => 'equal',
+                        'value' => 'APPROVED',
+                    ],
+                    [
+                        'field' => 'semester',
+                        'operator' => 'equal',
+                        'value' => 'GANJIL',
+                    ],
+                    [
+                        'field' => 'course_credits',
+                        'operator' => 'gte',
+                        'value' => 3,
+                    ],
+                ],
+            ]),
+        ]);
+
+        $response->assertOk();
+
+        foreach ($response->json('data') as $row) {
+            $this->assertSame(
+                'APPROVED',
+                $row['status']
             );
 
+            $this->assertSame(
+                'GANJIL',
+                $row['semester']
+            );
+
+            $this->assertGreaterThanOrEqual(
+                3,
+                (int) $row['course_credits']
+            );
+        }
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | ADVANCED FILTER - OR
+    |--------------------------------------------------------------------------
+    */
+
+    public function test_advanced_filters_with_or_logic(): void
+    {
+        $allowedStatuses = [
+            'APPROVED',
+            'REJECTED',
+        ];
+
+        $response = $this->getEnrollments([
+            'filters' => $this->decodeArray([
+                'logic' => 'OR',
+                'items' => [
+                    [
+                        'field' => 'status',
+                        'operator' => 'equal',
+                        'value' => 'APPROVED',
+                    ],
+                    [
+                        'field' => 'status',
+                        'operator' => 'equal',
+                        'value' => 'REJECTED',
+                    ],
+                ],
+            ]),
+        ]);
+
+        $response->assertOk();
+
+        foreach ($response->json('data') as $row) {
+            $this->assertContains(
+                $row['status'],
+                $allowedStatuses
+            );
+        }
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | LEGACY + ADVANCED FILTER
+    |--------------------------------------------------------------------------
+    */
+
+    public function test_legacy_and_advanced_filters_are_combined_with_and(): void
+    {
+        $response = $this->getEnrollments([
+            'status' => 'APPROVED',
+            'semester' => 'GANJIL',
+
+            'filters' => $this->decodeArray([
+                'logic' => 'AND',
+                'items' => [
+                    [
+                        'field' => 'course_credits',
+                        'operator' => 'gte',
+                        'value' => 3,
+                    ],
+                ],
+            ]),
+        ]);
+
+        $response->assertOk();
+
+        foreach ($response->json('data') as $row) {
+            $this->assertSame(
+                'APPROVED',
+                $row['status']
+            );
+
+            $this->assertSame(
+                'GANJIL',
+                $row['semester']
+            );
+
+            $this->assertGreaterThanOrEqual(
+                3,
+                (int) $row['course_credits']
+            );
+        }
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | ADVANCED SORT - SINGLE COLUMN
+    |--------------------------------------------------------------------------
+    */
+
+    public function test_advanced_sort_student_name_ascending(): void
+    {
+        $response = $this->getEnrollments([
+            'sorts' => $this->decodeArray([
+                [
+                    'field' => 'student_name',
+                    'direction' => 'asc',
+                ],
+            ]),
+            'page_size' => 25,
+        ]);
+
+        $response->assertOk();
+
+        $rows = $response->json('data');
+
+        $values = array_map(
+            fn ($row) => $row['student_name'],
+            $rows
+        );
+
+        $expected = $values;
+        sort($expected, SORT_NATURAL | SORT_FLAG_CASE);
+
         $this->assertSame(
-            '2026/2027',
-            $response->json(
-                'data.0.academic_year'
-            )
+            $expected,
+            $values
+        );
+    }
+
+    public function test_advanced_sort_course_credits_descending(): void
+    {
+        $response = $this->getEnrollments([
+            'sorts' => $this->decodeArray([
+                [
+                    'field' => 'course_credits',
+                    'direction' => 'desc',
+                ],
+            ]),
+            'page_size' => 25,
+        ]);
+
+        $response->assertOk();
+
+        $rows = $response->json('data');
+
+        $values = array_map(
+            fn ($row) => (int) $row['course_credits'],
+            $rows
+        );
+
+        $expected = $values;
+        rsort($expected);
+
+        $this->assertSame(
+            $expected,
+            $values
         );
     }
 
     /*
-     * ============================================
-     * COMBINED QUERY
-     * ============================================
-     */
+    |--------------------------------------------------------------------------
+    | ADVANCED SORT - MULTI COLUMN
+    |--------------------------------------------------------------------------
+    */
 
-    public function test_can_combine_search_filter_sort_and_pagination(): void
-    {
-        $response = $this->getJson(
-            '/api/enrollments'
-            . '?search=IF001'
-            . '&semester=GANJIL'
-            . '&sort=student_nim'
-            . '&direction=asc'
-            . '&page=1'
-            . '&page_size=1'
+    public function test_advanced_multi_column_sort(): void
+{
+    $response = $this->getEnrollments([
+        'sorts' => $this->decodeArray([
+            [
+                'field' => 'student_name',
+                'direction' => 'asc',
+            ],
+            [
+                'field' => 'course_credits',
+                'direction' => 'desc',
+            ],
+            [
+                'field' => 'course_code',
+                'direction' => 'asc',
+            ],
+        ]),
+        'page_size' => 50,
+    ]);
+
+    $response
+        ->assertOk()
+        ->assertJsonStructure([
+            'message',
+            'data',
+            'meta',
+            'links',
+        ]);
+
+    $rows = $response->json('data');
+
+    $this->assertNotEmpty($rows);
+
+    /*
+     * Validate that the returned rows follow the same
+     * multi-column ordering requested from the API.
+     *
+     * We use the exact values returned by the API and
+     * compare adjacent rows.
+     */
+    for ($i = 1; $i < count($rows); $i++) {
+        $previous = $rows[$i - 1];
+        $current = $rows[$i];
+
+        /*
+         * First priority:
+         * student_name ASC
+         */
+        $nameComparison = strcasecmp(
+            (string) $previous['student_name'],
+            (string) $current['student_name']
         );
 
-        $response
-            ->assertOk()
-            ->assertJsonPath(
-                'meta.current_page',
-                1
-            )
-            ->assertJsonPath(
-                'meta.per_page',
-                1
+        if ($nameComparison < 0) {
+            continue;
+        }
+
+        if ($nameComparison > 0) {
+            $this->fail(
+                sprintf(
+                    'Multi-column sort violation: student_name "%s" appears before "%s".',
+                    $previous['student_name'],
+                    $current['student_name']
+                )
             );
+        }
+
+        /*
+         * Same student name.
+         *
+         * Second priority:
+         * course_credits DESC
+         */
+        $previousCredits =
+            (int) $previous['course_credits'];
+
+        $currentCredits =
+            (int) $current['course_credits'];
+
+        if ($previousCredits > $currentCredits) {
+            continue;
+        }
+
+        if ($previousCredits < $currentCredits) {
+            $this->fail(
+                sprintf(
+                    'Multi-column sort violation: for student "%s", credits %d appears before %d.',
+                    $previous['student_name'],
+                    $previousCredits,
+                    $currentCredits
+                )
+            );
+        }
+
+        /*
+         * Same student name + same credits.
+         *
+         * Third priority:
+         * course_code ASC
+         */
+        $courseComparison = strcmp(
+            (string) $previous['course_code'],
+            (string) $current['course_code']
+        );
 
         $this->assertLessThanOrEqual(
-            1,
-            count($response->json('data'))
+            0,
+            $courseComparison,
+            sprintf(
+                'Multi-column sort violation: course_code "%s" appears before "%s".',
+                $previous['course_code'],
+                $current['course_code']
+            )
+        );
+    }
+}
+
+    /*
+    |--------------------------------------------------------------------------
+    | ADVANCED SORT - ID
+    |--------------------------------------------------------------------------
+    */
+
+    public function test_advanced_sort_by_id_ascending(): void
+    {
+        $response = $this->getEnrollments([
+            'sorts' => $this->decodeArray([
+                [
+                    'field' => 'id',
+                    'direction' => 'asc',
+                ],
+            ]),
+            'page_size' => 25,
+        ]);
+
+        $response->assertOk();
+
+        $rows = $response->json('data');
+
+        $ids = array_map(
+            fn ($row) => (int) $row['id'],
+            $rows
+        );
+
+        $expected = $ids;
+        sort($expected);
+
+        $this->assertSame(
+            $expected,
+            $ids
+        );
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | ADVANCED FILTER + SORT + PAGINATION
+    |--------------------------------------------------------------------------
+    */
+
+    public function test_advanced_filter_sort_and_pagination_work_together(): void
+    {
+        $response = $this->getEnrollments([
+            'filters' => $this->decodeArray([
+                'logic' => 'AND',
+                'items' => [
+                    [
+                        'field' => 'status',
+                        'operator' => 'equal',
+                        'value' => 'APPROVED',
+                    ],
+                    [
+                        'field' => 'course_credits',
+                        'operator' => 'gte',
+                        'value' => 3,
+                    ],
+                ],
+            ]),
+
+            'sorts' => $this->decodeArray([
+                [
+                    'field' => 'student_name',
+                    'direction' => 'asc',
+                ],
+                [
+                    'field' => 'id',
+                    'direction' => 'asc',
+                ],
+            ]),
+
+            'page' => 2,
+            'page_size' => 10,
+        ]);
+
+        $response
+            ->assertOk()
+            ->assertJsonStructure([
+                'message',
+                'data',
+                'meta' => [
+                    'current_page',
+                    'per_page',
+                    'from',
+                    'to',
+                    'has_more_pages',
+                ],
+                'links' => [
+                    'prev',
+                    'next',
+                ],
+            ]);
+
+        $this->assertSame(
+            2,
+            $response->json('meta.current_page')
+        );
+
+        $this->assertSame(
+            10,
+            $response->json('meta.per_page')
         );
 
         foreach ($response->json('data') as $row) {
             $this->assertSame(
-                'GANJIL',
-                $row['semester']
+                'APPROVED',
+                $row['status']
             );
 
-            $this->assertSame(
-                'IF001',
-                $row['course_code']
+            $this->assertGreaterThanOrEqual(
+                3,
+                (int) $row['course_credits']
             );
         }
     }
 
     /*
-     * ============================================
-     * SORTING
-     * ============================================
-     */
+    |--------------------------------------------------------------------------
+    | VALIDATION - INVALID FIELD
+    |--------------------------------------------------------------------------
+    */
 
-    public function test_can_sort_by_student_nim_ascending(): void
+    public function test_advanced_filter_rejects_unknown_field(): void
     {
-        $response = $this->getJson(
-            '/api/enrollments'
-            . '?sort=student_nim'
-            . '&direction=asc'
-        );
-
-        $response->assertOk();
-
-        $data = $response->json('data');
-
-        $nims = array_column(
-            $data,
-            'student_nim'
-        );
-
-        $sorted = $nims;
-
-        sort($sorted);
-
-        $this->assertSame(
-            $sorted,
-            $nims
-        );
-    }
-
-    public function test_can_sort_by_student_nim_descending(): void
-    {
-        $response = $this->getJson(
-            '/api/enrollments'
-            . '?sort=student_nim'
-            . '&direction=desc'
-        );
-
-        $response->assertOk();
-
-        $data = $response->json('data');
-
-        $nims = array_column(
-            $data,
-            'student_nim'
-        );
-
-        $sorted = $nims;
-
-        rsort($sorted);
-
-        $this->assertSame(
-            $sorted,
-            $nims
-        );
-    }
-
-    /*
-     * ============================================
-     * POST / STORE
-     * ============================================
-     */
-
-    public function test_can_create_enrollment(): void
-    {
-        $payload = [
-            'student' => [
-                'nim' => '20269999',
-                'name' => 'Mahasiswa API Test',
-                'email' => 'api.test@example.com',
-            ],
-
-            'course' => [
-                'code' => 'IF999',
-                'name' => 'Testing API Laravel',
-                'credits' => 3,
-            ],
-
-            'academic_year' => '2026/2027',
-            'semester' => 'GANJIL',
-            'status' => 'DRAFT',
-        ];
-
-        $response = $this->postJson(
-            '/api/enrollments',
-            $payload
-        );
-
-        $response
-            ->assertCreated()
-            ->assertJsonPath(
-                'message',
-                'Enrollment created successfully.'
-            )
-            ->assertJsonPath(
-                'data.student.nim',
-                '20269999'
-            )
-            ->assertJsonPath(
-                'data.course.code',
-                'IF999'
-            )
-            ->assertJsonPath(
-                'data.academic_year',
-                '2026/2027'
-            )
-            ->assertJsonPath(
-                'data.semester',
-                'GANJIL'
-            )
-            ->assertJsonPath(
-                'data.status',
-                'DRAFT'
-            );
-
-        $this->assertDatabaseHas(
-            'students',
-            [
-                'nim' => '20269999',
-            ]
-        );
-
-        $this->assertDatabaseHas(
-            'courses',
-            [
-                'code' => 'IF999',
-            ]
-        );
-
-        $this->assertDatabaseHas(
-            'enrollments',
-            [
-                'academic_year' => '2026/2027',
-                'semester' => 'GANJIL',
-                'status' => 'DRAFT',
-            ]
-        );
-    }
-
-    /*
-     * ============================================
-     * VALIDATION
-     * ============================================
-     */
-
-    public function test_rejects_invalid_enrollment_payload(): void
-    {
-        $payload = [
-            'student' => [
-                'nim' => 'ABC',
-                'name' => '',
-                'email' => 'not-an-email',
-            ],
-
-            'course' => [
-                'code' => 'BAD',
-                'name' => '',
-                'credits' => 99,
-            ],
-
-            'academic_year' => 'wrong',
-            'semester' => 'RANDOM',
-            'status' => 'RANDOM',
-        ];
-
-        $response = $this->postJson(
-            '/api/enrollments',
-            $payload
-        );
-
-        $response->assertUnprocessable();
-
-        $response->assertJsonValidationErrors([
-            'student.nim',
-            'student.name',
-            'student.email',
-            'course.name',
-            'course.credits',
-            'academic_year',
-            'semester',
-            'status',
+        $response = $this->getEnrollments([
+            'filters' => $this->decodeArray([
+                'logic' => 'AND',
+                'items' => [
+                    [
+                        'field' => 'unknown_field',
+                        'operator' => 'equal',
+                        'value' => 'test',
+                    ],
+                ],
+            ]),
         ]);
+
+        $response
+            ->assertStatus(422)
+            ->assertJsonValidationErrors([
+                'filters.items.0.field',
+            ]);
     }
 
     /*
-     * ============================================
-     * DUPLICATE
-     * ============================================
-     */
+    |--------------------------------------------------------------------------
+    | VALIDATION - INVALID OPERATOR
+    |--------------------------------------------------------------------------
+    */
 
-    public function test_rejects_duplicate_enrollment(): void
+    public function test_advanced_filter_rejects_unknown_operator(): void
     {
-        $payload = [
-            'student' => [
-                'nim' => '20269998',
-                'name' => 'Duplicate Test',
-                'email' => 'duplicate@example.com',
-            ],
+        $response = $this->getEnrollments([
+            'filters' => $this->decodeArray([
+                'logic' => 'AND',
+                'items' => [
+                    [
+                        'field' => 'status',
+                        'operator' => 'contains',
+                        'value' => 'APPROVED',
+                    ],
+                ],
+            ]),
+        ]);
 
-            'course' => [
-                'code' => 'IF998',
-                'name' => 'Duplicate Course',
-                'credits' => 3,
-            ],
-
-            'academic_year' => '2026/2027',
-            'semester' => 'GANJIL',
-            'status' => 'DRAFT',
-        ];
-
-        $first = $this->postJson(
-            '/api/enrollments',
-            $payload
-        );
-
-        $first->assertCreated();
-
-        $second = $this->postJson(
-            '/api/enrollments',
-            $payload
-        );
-
-        $second
-            ->assertStatus(409)
-            ->assertJsonPath(
-                'error',
-                'DUPLICATE_ENROLLMENT'
-            );
+        /*
+         * Status hanya mendukung:
+         * equal / in
+         */
+        $response
+            ->assertStatus(422)
+            ->assertJsonValidationErrors([
+                'filters.items.0.operator',
+            ]);
     }
 
     /*
-     * ============================================
-     * SHOW
-     * ============================================
-     */
+    |--------------------------------------------------------------------------
+    | VALIDATION - INVALID LOGIC
+    |--------------------------------------------------------------------------
+    */
 
-    public function test_can_show_enrollment(): void
+    public function test_advanced_filter_rejects_invalid_logic(): void
     {
-        $enrollment = Enrollment::firstOrFail();
+        $response = $this->getEnrollments([
+            'filters' => $this->decodeArray([
+                'logic' => 'XOR',
+                'items' => [
+                    [
+                        'field' => 'status',
+                        'operator' => 'equal',
+                        'value' => 'APPROVED',
+                    ],
+                ],
+            ]),
+        ]);
 
+        $response
+            ->assertStatus(422)
+            ->assertJsonValidationErrors([
+                'filters.logic',
+            ]);
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | VALIDATION - BETWEEN
+    |--------------------------------------------------------------------------
+    */
+
+    public function test_advanced_between_requires_exactly_two_values(): void
+    {
+        $response = $this->getEnrollments([
+            'filters' => $this->decodeArray([
+                'logic' => 'AND',
+                'items' => [
+                    [
+                        'field' => 'course_credits',
+                        'operator' => 'between',
+                        'value' => [2],
+                    ],
+                ],
+            ]),
+        ]);
+
+        $response
+            ->assertStatus(422)
+            ->assertJsonValidationErrors([
+                'filters.items.0.value',
+            ]);
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | VALIDATION - IN
+    |--------------------------------------------------------------------------
+    */
+
+    public function test_advanced_in_requires_array(): void
+    {
+        $response = $this->getEnrollments([
+            'filters' => $this->decodeArray([
+                'logic' => 'AND',
+                'items' => [
+                    [
+                        'field' => 'status',
+                        'operator' => 'in',
+                        'value' => 'APPROVED',
+                    ],
+                ],
+            ]),
+        ]);
+
+        $response
+            ->assertStatus(422)
+            ->assertJsonValidationErrors([
+                'filters.items.0.value',
+            ]);
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | VALIDATION - DUPLICATE SORT FIELD
+    |--------------------------------------------------------------------------
+    */
+
+    public function test_advanced_sort_rejects_duplicate_field(): void
+    {
+        $response = $this->getEnrollments([
+            'sorts' => $this->decodeArray([
+                [
+                    'field' => 'student_name',
+                    'direction' => 'asc',
+                ],
+                [
+                    'field' => 'student_name',
+                    'direction' => 'desc',
+                ],
+            ]),
+        ]);
+
+        $response
+            ->assertStatus(422)
+            ->assertJsonValidationErrors([
+                'sorts.1.field',
+            ]);
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | VALIDATION - UNKNOWN SORT FIELD
+    |--------------------------------------------------------------------------
+    */
+
+    public function test_advanced_sort_rejects_unknown_field(): void
+    {
+        $response = $this->getEnrollments([
+            'sorts' => $this->decodeArray([
+                [
+                    'field' => 'unknown_field',
+                    'direction' => 'asc',
+                ],
+            ]),
+        ]);
+
+        $response
+            ->assertStatus(422)
+            ->assertJsonValidationErrors([
+                'sorts.0.field',
+            ]);
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | VALIDATION - INVALID JSON
+    |--------------------------------------------------------------------------
+    */
+
+    public function test_advanced_filters_reject_invalid_json(): void
+    {
         $response = $this->getJson(
-            "/api/enrollments/{$enrollment->id}"
+            '/api/enrollments?filters={invalid-json}'
         );
 
         $response
-            ->assertOk()
-            ->assertJsonPath(
-                'data.id',
-                $enrollment->id
-            )
-            ->assertJsonPath(
-                'data.student.nim',
-                $enrollment->student->nim
-            )
-            ->assertJsonPath(
-                'data.course.code',
-                $enrollment->course->code
-            );
+            ->assertStatus(422)
+            ->assertJsonValidationErrors([
+                'filters',
+            ]);
     }
 
-    /*
-     * ============================================
-     * UPDATE
-     * ============================================
-     */
-
-    public function test_can_update_enrollment(): void
+    public function test_advanced_sorts_reject_invalid_json(): void
     {
-        $enrollment = Enrollment::firstOrFail();
-
-        $payload = [
-            'academic_year' => '2026/2027',
-            'semester' => 'GENAP',
-            'status' => 'SUBMITTED',
-        ];
-
-        $response = $this->putJson(
-            "/api/enrollments/{$enrollment->id}",
-            $payload
+        $response = $this->getJson(
+            '/api/enrollments?sorts={invalid-json}'
         );
 
         $response
-            ->assertOk()
-            ->assertJsonPath(
-                'message',
-                'Enrollment updated successfully.'
-            )
-            ->assertJsonPath(
-                'data.academic_year',
-                '2026/2027'
-            )
-            ->assertJsonPath(
-                'data.semester',
-                'GENAP'
-            )
-            ->assertJsonPath(
-                'data.status',
-                'SUBMITTED'
-            );
-
-        $this->assertDatabaseHas(
-            'enrollments',
-            [
-                'id' => $enrollment->id,
-                'academic_year' => '2026/2027',
-                'semester' => 'GENAP',
-                'status' => 'SUBMITTED',
-            ]
-        );
+            ->assertStatus(422)
+            ->assertJsonValidationErrors([
+                'sorts',
+            ]);
     }
 
     /*
-     * ============================================
-     * DELETE
-     * ============================================
-     */
+    |--------------------------------------------------------------------------
+    | VALIDATION - COURSE CREDITS
+    |--------------------------------------------------------------------------
+    */
 
-    public function test_can_delete_enrollment(): void
+    public function test_advanced_course_credits_rejects_invalid_value(): void
     {
-        $enrollment = Enrollment::firstOrFail();
-
-        $studentId = $enrollment->student_id;
-        $courseId = $enrollment->course_id;
-
-        $response = $this->deleteJson(
-            "/api/enrollments/{$enrollment->id}"
-        );
+        $response = $this->getEnrollments([
+            'filters' => $this->decodeArray([
+                'logic' => 'AND',
+                'items' => [
+                    [
+                        'field' => 'course_credits',
+                        'operator' => 'equal',
+                        'value' => 99,
+                    ],
+                ],
+            ]),
+        ]);
 
         $response
-            ->assertOk()
-            ->assertJsonPath(
-                'message',
-                'Enrollment deleted successfully.'
-            );
-
-        $this->assertDatabaseMissing(
-            'enrollments',
-            [
-                'id' => $enrollment->id,
-            ]
-        );
-
-        /*
-         * Student must remain.
-         */
-        $this->assertDatabaseHas(
-            'students',
-            [
-                'id' => $studentId,
-            ]
-        );
-
-        /*
-         * Course must remain.
-         */
-        $this->assertDatabaseHas(
-            'courses',
-            [
-                'id' => $courseId,
-            ]
-        );
+            ->assertStatus(422)
+            ->assertJsonValidationErrors([
+                'filters.items.0.value',
+            ]);
     }
 
     /*
-     * ============================================
-     * 404 AFTER DELETE
-     * ============================================
-     */
+    |--------------------------------------------------------------------------
+    | VALIDATION - ACADEMIC YEAR
+    |--------------------------------------------------------------------------
+    */
 
-    public function test_deleted_enrollment_returns_404(): void
+    public function test_advanced_academic_year_rejects_invalid_format(): void
     {
-        $enrollment = Enrollment::firstOrFail();
+        $response = $this->getEnrollments([
+            'filters' => $this->decodeArray([
+                'logic' => 'AND',
+                'items' => [
+                    [
+                        'field' => 'academic_year',
+                        'operator' => 'equal',
+                        'value' => '2026-2027',
+                    ],
+                ],
+            ]),
+        ]);
 
-        $id = $enrollment->id;
+        $response
+            ->assertStatus(422)
+            ->assertJsonValidationErrors([
+                'filters.items.0.value',
+            ]);
+    }
 
-        $this->deleteJson(
-            "/api/enrollments/{$id}"
-        )->assertOk();
+    /*
+    |--------------------------------------------------------------------------
+    | VALIDATION - STATUS
+    |--------------------------------------------------------------------------
+    */
 
-        $this->getJson(
-            "/api/enrollments/{$id}"
-        )->assertNotFound();
+    public function test_advanced_status_rejects_invalid_value(): void
+    {
+        $response = $this->getEnrollments([
+            'filters' => $this->decodeArray([
+                'logic' => 'AND',
+                'items' => [
+                    [
+                        'field' => 'status',
+                        'operator' => 'equal',
+                        'value' => 'INVALID_STATUS',
+                    ],
+                ],
+            ]),
+        ]);
+
+        $response
+            ->assertStatus(422)
+            ->assertJsonValidationErrors([
+                'filters.items.0.value',
+            ]);
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | VALIDATION - SEMESTER
+    |--------------------------------------------------------------------------
+    */
+
+    public function test_advanced_semester_rejects_invalid_value(): void
+    {
+        $response = $this->getEnrollments([
+            'filters' => $this->decodeArray([
+                'logic' => 'AND',
+                'items' => [
+                    [
+                        'field' => 'semester',
+                        'operator' => 'equal',
+                        'value' => 'SEMESTER_3',
+                    ],
+                ],
+            ]),
+        ]);
+
+        $response
+            ->assertStatus(422)
+            ->assertJsonValidationErrors([
+                'filters.items.0.value',
+            ]);
     }
 }

@@ -44,11 +44,53 @@ export interface EnrollmentDeleteResponse {
 export async function getEnrollments(
   params: EnrollmentQueryParams,
 ): Promise<EnrollmentListResponse> {
+  const {
+    page,
+    pageSize,
+    filters,
+    sorts,
+    ...legacyParams
+  } = params;
+
+  const requestParams = {
+    ...legacyParams,
+
+    ...(page !== undefined
+      ? {
+          page,
+        }
+      : {}),
+
+    ...(pageSize !== undefined
+      ? {
+          page_size: pageSize,
+        }
+      : {}),
+
+    ...(filters !== undefined
+      ? {
+          filters:
+            JSON.stringify(
+              filters,
+            ),
+        }
+      : {}),
+
+    ...(sorts !== undefined
+      ? {
+          sorts:
+            JSON.stringify(
+              sorts,
+            ),
+        }
+      : {}),
+  };
+
   const response =
     await apiClient.get<EnrollmentListResponse>(
       "/enrollments",
       {
-        params,
+        params: requestParams,
       },
     );
 

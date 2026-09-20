@@ -1,8 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 
 import { getEnrollments } from "@/lib/enrollments";
+import { getApiErrorMessage } from "@/lib/error";
 
 import type {
   EnrollmentListResponse,
@@ -37,7 +43,9 @@ export function useEnrollments(
 
   const [loading, setLoading] = useState(true);
 
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(
+    null,
+  );
 
   const [refreshKey, setRefreshKey] = useState(0);
 
@@ -77,28 +85,12 @@ export function useEnrollments(
           return;
         }
 
-        if (
-          typeof err === "object" &&
-          err !== null &&
-          "response" in err
-        ) {
-          const axiosError = err as {
-            response?: {
-              data?: {
-                message?: string;
-              };
-            };
-          };
-
-          setError(
-            axiosError.response?.data?.message ??
-              "Failed to load enrollments.",
-          );
-        } else if (err instanceof Error) {
-          setError(err.message);
-        } else {
-          setError("Failed to load enrollments.");
-        }
+        setError(
+          getApiErrorMessage(
+            err,
+            "Gagal memuat data enrollment. Silakan coba lagi.",
+          ),
+        );
 
         setData([]);
         setMeta(null);

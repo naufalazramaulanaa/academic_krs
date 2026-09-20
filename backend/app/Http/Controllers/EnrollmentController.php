@@ -2,15 +2,16 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Requests\AdvancedEnrollmentQueryRequest;
 use App\Http\Requests\StoreEnrollmentRequest;
 use App\Http\Requests\UpdateEnrollmentRequest;
 use App\Http\Resources\EnrollmentResource;
 use App\Models\Course;
 use App\Models\Enrollment;
 use App\Models\Student;
+use App\Services\EnrollmentQueryService;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
 class EnrollmentController extends Controller
@@ -18,7 +19,7 @@ class EnrollmentController extends Controller
     /**
      * Display a paginated list of enrollments.
      *
-     * Supported query parameters:
+     * Legacy query parameters:
      *
      * search
      * status
@@ -28,23 +29,31 @@ class EnrollmentController extends Controller
      * direction
      * page
      * page_size
+     *
+     * Advanced query parameters:
+     *
+     * filters
+     * sorts
      */
-    public function index(Request $request): JsonResponse
-    {
+    public function index(
+        AdvancedEnrollmentQueryRequest $request,
+        EnrollmentQueryService $queryService
+    ): JsonResponse {
         /*
-         * ============================================
-         * ALLOWED SORT COLUMNS
-         * ============================================
+         * ==========================================================
+         * ALLOWED LEGACY SORT COLUMNS
+         * ==========================================================
          *
-         * User cannot directly inject a column name
-         * into ORDER BY.
+         * Never allow raw user input to become an SQL column.
          */
         $allowedSorts = [
             'id' => 'e.id',
             'student_nim' => 's.nim',
             'student_name' => 's.name',
+            'student_email' => 's.email',
             'course_code' => 'c.code',
             'course_name' => 'c.name',
+            'course_credits' => 'c.credits',
             'semester' => 'e.semester',
             'academic_year' => 'e.academic_year',
             'status' => 'e.status',
@@ -52,13 +61,9 @@ class EnrollmentController extends Controller
         ];
 
         /*
-         * ============================================
+         * ==========================================================
          * BASE QUERY
-         * ============================================
-         *
-         * The enrollment table remains the main
-         * dataset. Student and course are joined
-         * only for filtering/output.
+         * ==========================================================
          */
         $query = Enrollment::query()
             ->from('enrollments as e')
@@ -96,47 +101,45 @@ class EnrollmentController extends Controller
             ]);
 
         /*
-         * ============================================
-         * SEARCH
-         * ============================================
+         * ==========================================================
+         * LEGACY SEARCH
+         * ==========================================================
          *
          * Search:
-         * - Student NIM
-         * - Student name
-         * - Course code
+         *
+         * - student NIM
+         * - student name
+         * - course code
          *
          * IMPORTANT:
          *
-         * Do NOT directly apply:
+         * We intentionally DO NOT use:
          *
+         * WHERE
          *     s.nim ILIKE ...
          *     OR s.name ILIKE ...
          *     OR c.code ILIKE ...
          *
-         * to the 5M-row enrollment join.
+         * directly against the 5M enrollment join.
          *
          * Instead:
          *
-         * 1. Find matching student IDs.
-         * 2. Find matching course IDs.
-         * 3. Filter enrollments using those IDs.
-         *
-         * This allows PostgreSQL to use the enrollment
-         * indexes much more efficiently.
+         * 1. Search students independently.
+         * 2. Search courses independently.
+         * 3. Filter enrollments by resulting IDs.
          */
         $search = trim(
-            (string) $request->query('search', '')
+            (string) $request->query(
+                'search',
+                ''
+            )
         );
 
         if ($search !== '') {
             $searchLike = '%' . $search . '%';
 
             /*
-             * Candidate students.
-             *
-             * This query searches only the students table,
-             * which is much smaller than the enrollments
-             * table.
+             * Candidate student IDs.
              */
             $studentIds = Student::query()
                 ->where(function ($q) use ($searchLike) {
@@ -154,9 +157,7 @@ class EnrollmentController extends Controller
                 ->select('id');
 
             /*
-             * Candidate courses.
-             *
-             * This query searches only the courses table.
+             * Candidate course IDs.
              */
             $courseIds = Course::query()
                 ->where(
@@ -167,18 +168,7 @@ class EnrollmentController extends Controller
                 ->select('id');
 
             /*
-             * Filter enrollments using the candidate IDs.
-             *
-             * PostgreSQL can then use:
-             *
-             * enrollments_student_...
-             *
-             * or
-             *
-             * enrollments_course_...
-             *
-             * instead of evaluating the text search
-             * across the entire joined enrollment dataset.
+             * Filter enrollments by candidate IDs.
              */
             $query->where(function ($q) use (
                 $studentIds,
@@ -196,9 +186,9 @@ class EnrollmentController extends Controller
         }
 
         /*
-         * ============================================
-         * STATUS FILTER
-         * ============================================
+         * ==========================================================
+         * LEGACY STATUS FILTER
+         * ==========================================================
          */
         $status = $request->query('status');
 
@@ -222,9 +212,9 @@ class EnrollmentController extends Controller
         }
 
         /*
-         * ============================================
-         * SEMESTER FILTER
-         * ============================================
+         * ==========================================================
+         * LEGACY SEMESTER FILTER
+         * ==========================================================
          */
         $semester = $request->query('semester');
 
@@ -246,9 +236,9 @@ class EnrollmentController extends Controller
         }
 
         /*
-         * ============================================
-         * ACADEMIC YEAR FILTER
-         * ============================================
+         * ==========================================================
+         * LEGACY ACADEMIC YEAR FILTER
+         * ==========================================================
          */
         $academicYear = $request->query(
             'academic_year'
@@ -268,96 +258,132 @@ class EnrollmentController extends Controller
         }
 
         /*
-         * ============================================
+         * ==========================================================
+         * ADVANCED FILTER
+         * ==========================================================
+         *
+         * Example:
+         *
+         * filters={
+         *   "logic":"AND",
+         *   "items":[
+         *     {
+         *       "field":"student_nim",
+         *       "operator":"contains",
+         *       "value":"2026"
+         *     },
+         *     {
+         *       "field":"status",
+         *       "operator":"in",
+         *       "value":["APPROVED","SUBMITTED"]
+         *     }
+         *   ]
+         * }
+         *
+         * Legacy filters above remain compatible.
+         *
+         * Therefore:
+         *
+         * legacy filter AND advanced filter
+         */
+        $queryService->applyFilters(
+            $query,
+            $request->input('filters')
+        );
+
+        /*
+         * ==========================================================
          * SORTING
-         * ============================================
-         */
-        $sort = $request->query(
-            'sort',
-            'created_at'
-        );
-
-        $direction = strtolower(
-            (string) $request->query(
-                'direction',
-                'desc'
-            )
-        );
-
-        /*
-         * Invalid sort column:
-         * fallback to created_at.
-         */
-        if (!array_key_exists(
-            $sort,
-            $allowedSorts
-        )) {
-            $sort = 'created_at';
-        }
-
-        /*
-         * Invalid direction:
-         * fallback to DESC.
-         */
-        if (!in_array(
-            $direction,
-            [
-                'asc',
-                'desc',
-            ],
-            true
-        )) {
-            $direction = 'desc';
-        }
-
-        $query->orderBy(
-            $allowedSorts[$sort],
-            $direction
-        );
-
-        /*
-         * ============================================
-         * STABLE SECONDARY ORDERING
-         * ============================================
+         * ==========================================================
          *
-         * This prevents unstable ordering when multiple
-         * rows have the same primary sort value.
+         * If advanced sorts are provided:
+         *
+         *     sorts=[...]
+         *
+         * then advanced sorting takes priority.
+         *
+         * Otherwise use the existing legacy:
+         *
+         *     sort
+         *     direction
          */
-        if ($sort !== 'id') {
-            $query->orderBy(
-                'e.id',
-                'desc'
+        $advancedSorts = $request->input('sorts');
+
+        if (
+            is_array($advancedSorts)
+            && count($advancedSorts) > 0
+        ) {
+            $queryService->applySorting(
+                $query,
+                $advancedSorts
             );
+        } else {
+            /*
+             * ======================================================
+             * LEGACY SORT
+             * ======================================================
+             */
+            $sort = $request->query(
+                'sort',
+                'created_at'
+            );
+
+            $direction = strtolower(
+                (string) $request->query(
+                    'direction',
+                    'desc'
+                )
+            );
+
+            if (
+                !is_string($sort)
+                || !array_key_exists(
+                    $sort,
+                    $allowedSorts
+                )
+            ) {
+                $sort = 'created_at';
+            }
+
+            if (
+                !in_array(
+                    $direction,
+                    [
+                        'asc',
+                        'desc',
+                    ],
+                    true
+                )
+            ) {
+                $direction = 'desc';
+            }
+
+            $query->orderBy(
+                $allowedSorts[$sort],
+                $direction
+            );
+
+            /*
+             * Stable ordering.
+             */
+            if ($sort !== 'id') {
+                $query->orderBy(
+                    'e.id',
+                    'desc'
+                );
+            }
         }
 
         /*
-         * ============================================
+         * ==========================================================
          * PAGINATION
-         * ============================================
+         * ==========================================================
          *
-         * Default:
-         * 25 rows per page.
+         * simplePaginate is intentional.
          *
-         * Maximum:
-         * 100 rows per page.
-         *
-         * IMPORTANT:
-         *
-         * simplePaginate() is intentionally used instead
-         * of paginate().
-         *
-         * paginate() performs:
-         *
-         *     SELECT COUNT(*)
-         *
-         * before fetching the page.
-         *
-         * With 5,000,000 enrollments, that COUNT was
-         * measured at ~1.5 seconds even for the default
-         * unfiltered listing.
-         *
-         * simplePaginate() only fetches the requested page
-         * and checks whether another page exists.
+         * We do NOT use paginate() here because paginate()
+         * executes COUNT(*) and that can become expensive on
+         * a 5M-row dataset.
          */
         $pageSize = (int) $request->query(
             'page_size',
@@ -366,36 +392,29 @@ class EnrollmentController extends Controller
 
         $pageSize = max(
             1,
-            min($pageSize, 100)
+            min(
+                $pageSize,
+                100
+            )
         );
 
         $result = $query
-            ->simplePaginate($pageSize)
+            ->simplePaginate(
+                $pageSize
+            )
             ->withQueryString();
 
         /*
-         * ============================================
+         * ==========================================================
          * RESPONSE
-         * ============================================
-         *
-         * simplePaginate() does not provide:
-         *
-         * - total
-         * - last_page
-         *
-         * Instead we expose:
-         *
-         * - current_page
-         * - per_page
-         * - from
-         * - to
-         * - has_more_pages
+         * ==========================================================
          */
         return response()->json([
             'message' =>
                 'Enrollments retrieved successfully.',
 
-            'data' => $result->items(),
+            'data' =>
+                $result->items(),
 
             'meta' => [
                 'current_page' =>
@@ -430,9 +449,6 @@ class EnrollmentController extends Controller
     public function show(
         Enrollment $enrollment
     ): EnrollmentResource {
-        /*
-         * Load related student and course.
-         */
         $enrollment->load([
             'student',
             'course',
@@ -455,19 +471,8 @@ class EnrollmentController extends Controller
         try {
             $enrollment = DB::transaction(
                 function () use ($request) {
-
                     /*
-                     * ==================================
-                     * STUDENT
-                     * ==================================
-                     *
-                     * Find by NIM.
-                     *
-                     * If existing:
-                     * update student data.
-                     *
-                     * If not existing:
-                     * create student.
+                     * Student
                      */
                     $student = Student::updateOrCreate(
                         [
@@ -490,11 +495,7 @@ class EnrollmentController extends Controller
                     );
 
                     /*
-                     * ==================================
-                     * COURSE
-                     * ==================================
-                     *
-                     * Find by course code.
+                     * Course
                      */
                     $course = Course::updateOrCreate(
                         [
@@ -517,9 +518,7 @@ class EnrollmentController extends Controller
                     );
 
                     /*
-                     * ==================================
-                     * ENROLLMENT
-                     * ==================================
+                     * Enrollment
                      */
                     return Enrollment::create([
                         'student_id' =>
@@ -546,9 +545,6 @@ class EnrollmentController extends Controller
                 }
             );
 
-            /*
-             * Load relationships for response.
-             */
             $enrollment->load([
                 'student',
                 'course',
@@ -563,9 +559,7 @@ class EnrollmentController extends Controller
                         $enrollment
                     ),
             ], 201);
-
         } catch (QueryException $e) {
-
             /*
              * PostgreSQL duplicate key violation.
              */
@@ -579,10 +573,6 @@ class EnrollmentController extends Controller
                 ], 409);
             }
 
-            /*
-             * Unknown database error:
-             * let Laravel handle it.
-             */
             throw $e;
         }
     }
@@ -595,13 +585,11 @@ class EnrollmentController extends Controller
         Enrollment $enrollment
     ): JsonResponse {
         try {
-
             DB::transaction(
                 function () use (
                     $request,
                     $enrollment
                 ) {
-
                     $enrollment->update([
                         'academic_year' =>
                             $request->input(
@@ -621,9 +609,6 @@ class EnrollmentController extends Controller
                 }
             );
 
-            /*
-             * Reload relationships.
-             */
             $enrollment->load([
                 'student',
                 'course',
@@ -638,9 +623,7 @@ class EnrollmentController extends Controller
                         $enrollment
                     ),
             ]);
-
         } catch (QueryException $e) {
-
             if ($e->getCode() === '23505') {
                 return response()->json([
                     'message' =>
