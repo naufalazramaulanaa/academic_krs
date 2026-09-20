@@ -55,25 +55,25 @@ class EnrollmentController extends Controller
          * ============================================
          * BASE QUERY
          * ============================================
+         *
+         * The enrollment table remains the main
+         * dataset. Student and course are joined
+         * only for filtering/output.
          */
-
         $query = Enrollment::query()
             ->from('enrollments as e')
-
             ->join(
                 'students as s',
                 's.id',
                 '=',
                 'e.student_id'
             )
-
             ->join(
                 'courses as c',
                 'c.id',
                 '=',
                 'e.course_id'
             )
-
             ->select([
                 'e.id',
                 'e.student_id',
@@ -105,10 +105,25 @@ class EnrollmentController extends Controller
          * - Student name
          * - Course code
          *
-         * PostgreSQL ILIKE is used so search is
-         * case-insensitive.
+         * IMPORTANT:
+         *
+         * Do NOT directly apply:
+         *
+         *     s.nim ILIKE ...
+         *     OR s.name ILIKE ...
+         *     OR c.code ILIKE ...
+         *
+         * to the 5M-row enrollment join.
+         *
+         * Instead:
+         *
+         * 1. Find matching student IDs.
+         * 2. Find matching course IDs.
+         * 3. Filter enrollments using those IDs.
+         *
+         * This allows PostgreSQL to use the enrollment
+         * indexes much more efficiently.
          */
-
         $search = trim(
             (string) $request->query('search', '')
         );
@@ -116,24 +131,67 @@ class EnrollmentController extends Controller
         if ($search !== '') {
             $searchLike = '%' . $search . '%';
 
-            $query->where(function ($q) use ($searchLike) {
-                $q->where(
-                    's.nim',
+            /*
+             * Candidate students.
+             *
+             * This query searches only the students table,
+             * which is much smaller than the enrollments
+             * table.
+             */
+            $studentIds = Student::query()
+                ->where(function ($q) use ($searchLike) {
+                    $q->where(
+                        'nim',
+                        'ILIKE',
+                        $searchLike
+                    )
+                        ->orWhere(
+                            'name',
+                            'ILIKE',
+                            $searchLike
+                        );
+                })
+                ->select('id');
+
+            /*
+             * Candidate courses.
+             *
+             * This query searches only the courses table.
+             */
+            $courseIds = Course::query()
+                ->where(
+                    'code',
                     'ILIKE',
                     $searchLike
                 )
+                ->select('id');
 
-                ->orWhere(
-                    's.name',
-                    'ILIKE',
-                    $searchLike
+            /*
+             * Filter enrollments using the candidate IDs.
+             *
+             * PostgreSQL can then use:
+             *
+             * enrollments_student_...
+             *
+             * or
+             *
+             * enrollments_course_...
+             *
+             * instead of evaluating the text search
+             * across the entire joined enrollment dataset.
+             */
+            $query->where(function ($q) use (
+                $studentIds,
+                $courseIds
+            ) {
+                $q->whereIn(
+                    'e.student_id',
+                    $studentIds
                 )
-
-                ->orWhere(
-                    'c.code',
-                    'ILIKE',
-                    $searchLike
-                );
+                    ->orWhereIn(
+                        'e.course_id',
+                        $courseIds
+                    );
             });
         }
 
@@ -142,7 +200,6 @@ class EnrollmentController extends Controller
          * STATUS FILTER
          * ============================================
          */
-
         $status = $request->query('status');
 
         if (
@@ -169,7 +226,6 @@ class EnrollmentController extends Controller
          * SEMESTER FILTER
          * ============================================
          */
-
         $semester = $request->query('semester');
 
         if (
@@ -194,7 +250,6 @@ class EnrollmentController extends Controller
          * ACADEMIC YEAR FILTER
          * ============================================
          */
-
         $academicYear = $request->query(
             'academic_year'
         );
@@ -217,7 +272,6 @@ class EnrollmentController extends Controller
          * SORTING
          * ============================================
          */
-
         $sort = $request->query(
             'sort',
             'created_at'
@@ -262,10 +316,12 @@ class EnrollmentController extends Controller
         );
 
         /*
-         * Stable secondary ordering.
+         * ============================================
+         * STABLE SECONDARY ORDERING
+         * ============================================
          *
-         * This is useful when many records have
-         * exactly the same sorting value.
+         * This prevents unstable ordering when multiple
+         * rows have the same primary sort value.
          */
         if ($sort !== 'id') {
             $query->orderBy(
@@ -284,8 +340,25 @@ class EnrollmentController extends Controller
          *
          * Maximum:
          * 100 rows per page.
+         *
+         * IMPORTANT:
+         *
+         * simplePaginate() is intentionally used instead
+         * of paginate().
+         *
+         * paginate() performs:
+         *
+         *     SELECT COUNT(*)
+         *
+         * before fetching the page.
+         *
+         * With 5,000,000 enrollments, that COUNT was
+         * measured at ~1.5 seconds even for the default
+         * unfiltered listing.
+         *
+         * simplePaginate() only fetches the requested page
+         * and checks whether another page exists.
          */
-
         $pageSize = (int) $request->query(
             'page_size',
             25
@@ -296,24 +369,28 @@ class EnrollmentController extends Controller
             min($pageSize, 100)
         );
 
-        /*
-         * IMPORTANT:
-         *
-         * paginate() executes SQL with LIMIT/OFFSET.
-         *
-         * It does NOT retrieve all 1000 rows
-         * and then paginate them in PHP.
-         */
         $result = $query
-            ->paginate($pageSize)
+            ->simplePaginate($pageSize)
             ->withQueryString();
 
         /*
          * ============================================
          * RESPONSE
          * ============================================
+         *
+         * simplePaginate() does not provide:
+         *
+         * - total
+         * - last_page
+         *
+         * Instead we expose:
+         *
+         * - current_page
+         * - per_page
+         * - from
+         * - to
+         * - has_more_pages
          */
-
         return response()->json([
             'message' =>
                 'Enrollments retrieved successfully.',
@@ -324,31 +401,20 @@ class EnrollmentController extends Controller
                 'current_page' =>
                     $result->currentPage(),
 
-                'last_page' =>
-                    $result->lastPage(),
-
                 'per_page' =>
                     $result->perPage(),
-
-                'total' =>
-                    $result->total(),
 
                 'from' =>
                     $result->firstItem(),
 
                 'to' =>
                     $result->lastItem(),
+
+                'has_more_pages' =>
+                    $result->hasMorePages(),
             ],
 
             'links' => [
-                'first' =>
-                    $result->url(1),
-
-                'last' =>
-                    $result->url(
-                        $result->lastPage()
-                    ),
-
                 'prev' =>
                     $result->previousPageUrl(),
 
@@ -455,7 +521,6 @@ class EnrollmentController extends Controller
                      * ENROLLMENT
                      * ==================================
                      */
-
                     return Enrollment::create([
                         'student_id' =>
                             $student->id,
